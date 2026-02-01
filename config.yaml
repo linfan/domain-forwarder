@@ -1,0 +1,73 @@
+# tiny-http-proxy configuration file
+
+# Proxy server configuration
+proxy:
+  # Listen address (host:port)
+  addr: ":8080"
+  
+  # Buffer size for data transfer (bytes)
+  buffer_size: 32768  # 32KB
+  
+  # Connection settings
+  connection:
+    # Dial timeout for connecting to target servers
+    dial_timeout: 30s
+    # Keep-alive interval for connections
+    keep_alive: 30s
+    # Timeout for target connection establishment (HTTPS tunneling)
+    target_dial_timeout: 30s
+  
+  # Transport settings (connection pool)
+  transport:
+    # Maximum number of idle connections across all hosts
+    max_idle_conns: 1000
+    # Maximum number of idle connections per host
+    max_idle_conns_per_host: 100
+    # Maximum number of connections per host (0 = no limit)
+    max_conns_per_host: 0
+    # How long idle connections stay in pool
+    idle_conn_timeout: 90s
+    # Timeout for TLS handshake
+    tls_handshake_timeout: 10s
+    # Timeout waiting for server to confirm Expect: 100-continue
+    expect_continue_timeout: 1s
+    # Timeout waiting for response headers
+    response_header_timeout: 30s
+    # Enable HTTP/2 support
+    force_attempt_http2: true
+    # Disable transparent compression
+    disable_compression: false
+  
+  # HTTP server settings
+  server:
+    # Timeout for reading request headers
+    read_header_timeout: 10s
+    # Timeout for idle connections
+    idle_timeout: 120s
+    # Maximum size of request headers (bytes)
+    max_header_bytes: 1048576  # 1MB
+    # Graceful shutdown timeout
+    shutdown_timeout: 30s
+
+# Request printer tool configuration
+request_printer:
+  # Listen address (host:port)
+  addr: ":9090"
+  
+  # Maximum body size to read (bytes)
+  max_body_read: 10485760  # 10MB
+  
+  # HTTP server settings
+  server:
+    # Timeout for reading entire request
+    read_timeout: 30s
+    # Timeout for writing response
+    write_timeout: 30s
+    # Timeout for idle connections
+    idle_timeout: 60s
+    # Timeout for reading request headers
+    read_header_timeout: 10s
+    # Maximum size of request headers (bytes)
+    max_header_bytes: 1048576  # 1MB
+    # Graceful shutdown timeout
+    shutdown_timeout: 10s
