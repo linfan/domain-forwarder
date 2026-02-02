@@ -175,8 +175,10 @@ make run-printer
 
 ## Building
 
+### Local Build
+
 ```bash
-# Build all
+# Build all for current platform
 make build
 
 # Build only proxy
@@ -187,7 +189,42 @@ make request-printer
 
 # Clean build artifacts
 make clean
+
+# View all available commands
+make help
 ```
+
+### Cross-Platform Build
+
+Build binaries for different platforms:
+
+```bash
+# Build for Linux (amd64)
+make build-linux
+
+# Build for Linux (arm64)
+make build-linux-arm64
+
+# Build for macOS (Intel)
+make build-macos
+
+# Build for macOS (Apple Silicon)
+make build-macos-arm64
+
+# Build for Windows
+make build-windows
+
+# Build for all platforms at once
+make build-all
+
+# Create release archives (tar.gz for Linux/macOS, zip for Windows)
+make release
+```
+
+Build artifacts:
+- Platform-specific binaries: `dist/<platform>-<arch>/`
+- Release archives: `dist/domain-forwarder-<version>-<platform>-<arch>.tar.gz`
+
 
 ## Testing
 

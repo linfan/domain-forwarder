@@ -19,6 +19,7 @@ vendor/
 
 # Build output directory
 /build/
+/dist/
 
 # IDE specific files
 .idea/

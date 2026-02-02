@@ -1,0 +1,39 @@
+[Unit]
+Description=Domain Forwarder HTTP/HTTPS Proxy Server
+Documentation=https://github.com/freyrlin/domain-forwarder
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=domain-forwarder
+Group=domain-forwarder
+
+# Working directory
+WorkingDirectory=/opt/domain-forwarder
+
+# Startup command
+ExecStart=/opt/domain-forwarder/domain-forwarder -config /etc/domain-forwarder/config.yaml
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Security hardening options
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/domain-forwarder
+
+# Standard output and error output
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=domain-forwarder
+
+[Install]
+WantedBy=multi-user.target
