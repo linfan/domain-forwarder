@@ -4,6 +4,9 @@ addr: ":8080"
 # Buffer size for data transfer (bytes)
 buffer_size: 32768  # 32KB
 
+# Enable debug logging: logs source, target, request/response size for every proxied request
+debug: false
+
 # Connection settings
 connection:
   # Dial timeout for connecting to target servers

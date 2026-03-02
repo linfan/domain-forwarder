@@ -23,6 +23,7 @@ type Config = ProxyConfig
 type ProxyConfig struct {
 	Addr       string           `yaml:"addr"`
 	BufferSize int              `yaml:"buffer_size"`
+	Debug      bool             `yaml:"debug"`
 	Connection ConnectionConfig `yaml:"connection"`
 	Transport  TransportConfig  `yaml:"transport"`
 	Server     ServerConfig     `yaml:"server"`
@@ -74,6 +75,7 @@ func defaultConfig() *Config {
 	return &Config{
 		Addr:       ":8080",
 		BufferSize: 32 * 1024,
+		Debug:      false,
 		Connection: ConnectionConfig{
 			DialTimeout:       30 * time.Second,
 			KeepAlive:         30 * time.Second,
@@ -238,11 +240,18 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.handleHTTP(w, r)
 	}
 
-	log.Printf("[%s] %s %s - %v", r.Method, r.Host, r.URL.Path, time.Since(startTime))
+	if r.Method != http.MethodConnect || !p.config.Debug {
+		log.Printf("[%s] %s %s - %v", r.Method, r.Host, r.URL.Path, time.Since(startTime))
+	}
 }
 
 // handleHTTP handles regular HTTP proxy requests
 func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	var start time.Time
+	if p.config.Debug {
+		start = time.Now()
+	}
+
 	// Ensure the URL has a scheme for proxy requests
 	if r.URL.Scheme == "" {
 		r.URL.Scheme = "http"
@@ -290,11 +299,21 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Copy response body using buffer pool
 	buf := bufferPool.Get().([]byte)
 	defer bufferPool.Put(buf)
-	io.CopyBuffer(w, resp.Body, buf)
+	respBytes, _ := io.CopyBuffer(w, resp.Body, buf)
+
+	if p.config.Debug {
+		log.Printf("[DEBUG] HTTP %s source=%s target=%s req_size=%d resp_status=%d resp_size=%d duration=%v",
+			r.Method, r.RemoteAddr, r.URL.String(), r.ContentLength, resp.StatusCode, respBytes, time.Since(start))
+	}
 }
 
 // handleHTTPS handles CONNECT method for HTTPS tunneling
 func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
+	var start time.Time
+	if p.config.Debug {
+		start = time.Now()
+	}
+
 	// Connect to the target host
 	targetConn, err := net.DialTimeout("tcp", r.Host, p.config.Connection.TargetDialTimeout)
 	if err != nil {
@@ -333,23 +352,36 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	copyConn := func(dst, src net.Conn) {
+	var clientToTarget, targetToClient int64
+
+	go func() {
 		defer wg.Done()
 		buf := bufferPool.Get().([]byte)
 		defer bufferPool.Put(buf)
-		io.CopyBuffer(dst, src, buf)
-		// Close write side to signal EOF
-		if tcpConn, ok := dst.(*net.TCPConn); ok {
+		clientToTarget, _ = io.CopyBuffer(targetConn, clientConn, buf)
+		if tcpConn, ok := targetConn.(*net.TCPConn); ok {
 			tcpConn.CloseWrite()
 		}
-	}
+	}()
 
-	go copyConn(targetConn, clientConn)
-	go copyConn(clientConn, targetConn)
+	go func() {
+		defer wg.Done()
+		buf := bufferPool.Get().([]byte)
+		defer bufferPool.Put(buf)
+		targetToClient, _ = io.CopyBuffer(clientConn, targetConn, buf)
+		if tcpConn, ok := clientConn.(*net.TCPConn); ok {
+			tcpConn.CloseWrite()
+		}
+	}()
 
 	wg.Wait()
 	clientConn.Close()
 	targetConn.Close()
+
+	if p.config.Debug {
+		log.Printf("[DEBUG] HTTPS CONNECT source=%s target=%s sent=%d recv=%d duration=%v",
+			r.RemoteAddr, r.Host, clientToTarget, targetToClient, time.Since(start))
+	}
 }
 
 // Hop-by-hop headers that should not be forwarded
