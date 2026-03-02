@@ -16,10 +16,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents the full configuration file structure
-type Config struct {
-	Proxy ProxyConfig `yaml:"proxy"`
-}
+// Config is the proxy server configuration
+type Config = ProxyConfig
 
 // ProxyConfig represents proxy server configuration
 type ProxyConfig struct {
@@ -74,31 +72,29 @@ var (
 // Default configuration values
 func defaultConfig() *Config {
 	return &Config{
-		Proxy: ProxyConfig{
-			Addr:       ":8080",
-			BufferSize: 32 * 1024,
-			Connection: ConnectionConfig{
-				DialTimeout:       30 * time.Second,
-				KeepAlive:         30 * time.Second,
-				TargetDialTimeout: 30 * time.Second,
-			},
-			Transport: TransportConfig{
-				MaxIdleConns:          1000,
-				MaxIdleConnsPerHost:   100,
-				MaxConnsPerHost:       0,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ExpectContinueTimeout: 1 * time.Second,
-				ResponseHeaderTimeout: 30 * time.Second,
-				ForceAttemptHTTP2:     true,
-				DisableCompression:    false,
-			},
-			Server: ServerConfig{
-				ReadHeaderTimeout: 10 * time.Second,
-				IdleTimeout:       120 * time.Second,
-				MaxHeaderBytes:    1 << 20,
-				ShutdownTimeout:   30 * time.Second,
-			},
+		Addr:       ":8080",
+		BufferSize: 32 * 1024,
+		Connection: ConnectionConfig{
+			DialTimeout:       30 * time.Second,
+			KeepAlive:         30 * time.Second,
+			TargetDialTimeout: 30 * time.Second,
+		},
+		Transport: TransportConfig{
+			MaxIdleConns:          1000,
+			MaxIdleConnsPerHost:   100,
+			MaxConnsPerHost:       0,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ForceAttemptHTTP2:     true,
+			DisableCompression:    false,
+		},
+		Server: ServerConfig{
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			MaxHeaderBytes:    1 << 20,
+			ShutdownTimeout:   30 * time.Second,
 		},
 	}
 }
@@ -147,19 +143,19 @@ func main() {
 
 	// Command-line flags override config file
 	if *listenAddr != "" {
-		cfg.Proxy.Addr = *listenAddr
+		cfg.Addr = *listenAddr
 	}
 
 	// Initialize buffer pool with configured size
 	bufferPool = sync.Pool{
 		New: func() interface{} {
-			return make([]byte, cfg.Proxy.BufferSize)
+			return make([]byte, cfg.BufferSize)
 		},
 	}
 
 	// Validate TLS config
-	if cfg.Proxy.TLS.Enabled {
-		if cfg.Proxy.TLS.CertFile == "" || cfg.Proxy.TLS.KeyFile == "" {
+	if cfg.TLS.Enabled {
+		if cfg.TLS.CertFile == "" || cfg.TLS.KeyFile == "" {
 			log.Fatalf("TLS enabled but cert_file or key_file is not configured")
 		}
 	}
@@ -168,40 +164,40 @@ func main() {
 	if *configFile != "" {
 		log.Printf("Loaded configuration from %s", *configFile)
 	}
-	if cfg.Proxy.TLS.Enabled {
-		log.Printf("Starting HTTPS proxy server on %s (TLS)", cfg.Proxy.Addr)
+	if cfg.TLS.Enabled {
+		log.Printf("Starting HTTPS proxy server on %s (TLS)", cfg.Addr)
 	} else {
-		log.Printf("Starting HTTP proxy server on %s", cfg.Proxy.Addr)
+		log.Printf("Starting HTTP proxy server on %s", cfg.Addr)
 	}
 
 	proxy := &ProxyServer{
-		config: cfg.Proxy,
+		config: *cfg,
 		transport: &http.Transport{
 			Proxy: nil,
 			DialContext: (&net.Dialer{
-				Timeout:   cfg.Proxy.Connection.DialTimeout,
-				KeepAlive: cfg.Proxy.Connection.KeepAlive,
+				Timeout:   cfg.Connection.DialTimeout,
+				KeepAlive: cfg.Connection.KeepAlive,
 			}).DialContext,
-			ForceAttemptHTTP2:     cfg.Proxy.Transport.ForceAttemptHTTP2,
-			MaxIdleConns:          cfg.Proxy.Transport.MaxIdleConns,
-			MaxIdleConnsPerHost:   cfg.Proxy.Transport.MaxIdleConnsPerHost,
-			MaxConnsPerHost:       cfg.Proxy.Transport.MaxConnsPerHost,
-			IdleConnTimeout:       cfg.Proxy.Transport.IdleConnTimeout,
-			TLSHandshakeTimeout:   cfg.Proxy.Transport.TLSHandshakeTimeout,
-			ExpectContinueTimeout: cfg.Proxy.Transport.ExpectContinueTimeout,
-			ResponseHeaderTimeout: cfg.Proxy.Transport.ResponseHeaderTimeout,
-			DisableCompression:    cfg.Proxy.Transport.DisableCompression,
+			ForceAttemptHTTP2:     cfg.Transport.ForceAttemptHTTP2,
+			MaxIdleConns:          cfg.Transport.MaxIdleConns,
+			MaxIdleConnsPerHost:   cfg.Transport.MaxIdleConnsPerHost,
+			MaxConnsPerHost:       cfg.Transport.MaxConnsPerHost,
+			IdleConnTimeout:       cfg.Transport.IdleConnTimeout,
+			TLSHandshakeTimeout:   cfg.Transport.TLSHandshakeTimeout,
+			ExpectContinueTimeout: cfg.Transport.ExpectContinueTimeout,
+			ResponseHeaderTimeout: cfg.Transport.ResponseHeaderTimeout,
+			DisableCompression:    cfg.Transport.DisableCompression,
 		},
 	}
 
 	server := &http.Server{
-		Addr:              cfg.Proxy.Addr,
+		Addr:              cfg.Addr,
 		Handler:           proxy,
 		ReadTimeout:       0, // No timeout for long-lived connections
 		WriteTimeout:      0,
-		IdleTimeout:       cfg.Proxy.Server.IdleTimeout,
-		ReadHeaderTimeout: cfg.Proxy.Server.ReadHeaderTimeout,
-		MaxHeaderBytes:    cfg.Proxy.Server.MaxHeaderBytes,
+		IdleTimeout:       cfg.Server.IdleTimeout,
+		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
+		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
 	}
 
 	// Graceful shutdown
@@ -210,13 +206,13 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Println("Shutting down proxy server...")
-		ctx, cancel := context.WithTimeout(context.Background(), cfg.Proxy.Server.ShutdownTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 		defer cancel()
 		server.Shutdown(ctx)
 	}()
 
-	if cfg.Proxy.TLS.Enabled {
-		if err := server.ListenAndServeTLS(cfg.Proxy.TLS.CertFile, cfg.Proxy.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+	if cfg.TLS.Enabled {
+		if err := server.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start TLS server: %v", err)
 		}
 	} else {

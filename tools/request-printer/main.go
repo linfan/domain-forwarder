@@ -17,10 +17,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents the full configuration file structure
-type Config struct {
-	RequestPrinter RequestPrinterConfig `yaml:"request_printer"`
-}
+// Config is the request printer configuration
+type Config = RequestPrinterConfig
 
 // RequestPrinterConfig represents request printer configuration
 type RequestPrinterConfig struct {
@@ -47,17 +45,15 @@ var (
 // Default configuration values
 func defaultConfig() *Config {
 	return &Config{
-		RequestPrinter: RequestPrinterConfig{
-			Addr:        ":9090",
-			MaxBodyRead: 10 * 1024 * 1024,
-			Server: ServerConfig{
-				ReadTimeout:       30 * time.Second,
-				WriteTimeout:      30 * time.Second,
-				IdleTimeout:       60 * time.Second,
-				ReadHeaderTimeout: 10 * time.Second,
-				MaxHeaderBytes:    1 << 20,
-				ShutdownTimeout:   10 * time.Second,
-			},
+		Addr:        ":9090",
+		MaxBodyRead: 10 * 1024 * 1024,
+		Server: ServerConfig{
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
+			MaxHeaderBytes:    1 << 20,
+			ShutdownTimeout:   10 * time.Second,
 		},
 	}
 }
@@ -122,7 +118,7 @@ func main() {
 
 	// Command-line flags override config file
 	if *listenAddr != "" {
-		cfg.RequestPrinter.Addr = *listenAddr
+		cfg.Addr = *listenAddr
 	}
 
 	// Set global config for handler
@@ -132,16 +128,16 @@ func main() {
 	if *configFile != "" {
 		log.Printf("Loaded configuration from %s", *configFile)
 	}
-	log.Printf("Starting request-printer service on %s", cfg.RequestPrinter.Addr)
+	log.Printf("Starting request-printer service on %s", cfg.Addr)
 
 	server := &http.Server{
-		Addr:              cfg.RequestPrinter.Addr,
+		Addr:              cfg.Addr,
 		Handler:           http.HandlerFunc(handleRequest),
-		ReadTimeout:       cfg.RequestPrinter.Server.ReadTimeout,
-		WriteTimeout:      cfg.RequestPrinter.Server.WriteTimeout,
-		IdleTimeout:       cfg.RequestPrinter.Server.IdleTimeout,
-		ReadHeaderTimeout: cfg.RequestPrinter.Server.ReadHeaderTimeout,
-		MaxHeaderBytes:    cfg.RequestPrinter.Server.MaxHeaderBytes,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		IdleTimeout:       cfg.Server.IdleTimeout,
+		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
+		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
 	}
 
 	// Graceful shutdown
@@ -150,7 +146,7 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Println("Shutting down request-printer service...")
-		ctx, cancel := context.WithTimeout(context.Background(), cfg.RequestPrinter.Server.ShutdownTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 		defer cancel()
 		server.Shutdown(ctx)
 	}()
@@ -189,7 +185,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Read body with limit
 	var bodyBytes []byte
 	if r.Body != nil {
-		limitReader := io.LimitReader(r.Body, globalConfig.RequestPrinter.MaxBodyRead)
+		limitReader := io.LimitReader(r.Body, globalConfig.MaxBodyRead)
 		bodyBytes, _ = io.ReadAll(limitReader)
 		r.Body.Close()
 	}
