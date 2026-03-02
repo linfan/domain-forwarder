@@ -49,6 +49,16 @@ proxy:
     # Graceful shutdown timeout
     shutdown_timeout: 30s
 
+  # TLS/SSL configuration for the proxy listener
+  # When enabled, clients connect to this proxy over HTTPS
+  tls:
+    # Set to true to enable HTTPS on the proxy listener
+    enabled: false
+    # Path to the TLS certificate file (PEM format)
+    cert_file: ""
+    # Path to the TLS private key file (PEM format)
+    key_file: ""
+
 # Request printer tool configuration
 request_printer:
   # Listen address (host:port)

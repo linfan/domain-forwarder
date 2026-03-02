@@ -28,6 +28,7 @@ type ProxyConfig struct {
 	Connection ConnectionConfig `yaml:"connection"`
 	Transport  TransportConfig  `yaml:"transport"`
 	Server     ServerConfig     `yaml:"server"`
+	TLS        TLSConfig        `yaml:"tls"`
 }
 
 // ConnectionConfig represents connection settings
@@ -56,6 +57,13 @@ type ServerConfig struct {
 	IdleTimeout       time.Duration `yaml:"idle_timeout"`
 	MaxHeaderBytes    int           `yaml:"max_header_bytes"`
 	ShutdownTimeout   time.Duration `yaml:"shutdown_timeout"`
+}
+
+// TLSConfig represents TLS/SSL configuration for the proxy listener
+type TLSConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
 }
 
 var (
@@ -149,11 +157,22 @@ func main() {
 		},
 	}
 
+	// Validate TLS config
+	if cfg.Proxy.TLS.Enabled {
+		if cfg.Proxy.TLS.CertFile == "" || cfg.Proxy.TLS.KeyFile == "" {
+			log.Fatalf("TLS enabled but cert_file or key_file is not configured")
+		}
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	if *configFile != "" {
 		log.Printf("Loaded configuration from %s", *configFile)
 	}
-	log.Printf("Starting HTTP proxy server on %s", cfg.Proxy.Addr)
+	if cfg.Proxy.TLS.Enabled {
+		log.Printf("Starting HTTPS proxy server on %s (TLS)", cfg.Proxy.Addr)
+	} else {
+		log.Printf("Starting HTTP proxy server on %s", cfg.Proxy.Addr)
+	}
 
 	proxy := &ProxyServer{
 		config: cfg.Proxy,
@@ -196,8 +215,14 @@ func main() {
 		server.Shutdown(ctx)
 	}()
 
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Failed to start server: %v", err)
+	if cfg.Proxy.TLS.Enabled {
+		if err := server.ListenAndServeTLS(cfg.Proxy.TLS.CertFile, cfg.Proxy.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start TLS server: %v", err)
+		}
+	} else {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
 	}
 	log.Println("Server stopped")
 }
