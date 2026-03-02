@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"io"
 	"log"
@@ -210,15 +211,15 @@ func main() {
 		log.Println("Shutting down proxy server...")
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 		defer cancel()
-		server.Shutdown(ctx)
+		_ = server.Shutdown(ctx)
 	}()
 
 	if cfg.TLS.Enabled {
-		if err := server.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Failed to start TLS server: %v", err)
 		}
 	} else {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}
@@ -232,25 +233,16 @@ type ProxyServer struct {
 }
 
 func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	startTime := time.Now()
-
 	if r.Method == http.MethodConnect {
 		p.handleHTTPS(w, r)
 	} else {
 		p.handleHTTP(w, r)
 	}
-
-	if r.Method != http.MethodConnect || !p.config.Debug {
-		log.Printf("[%s] %s %s - %v", r.Method, r.Host, r.URL.Path, time.Since(startTime))
-	}
 }
 
 // handleHTTP handles regular HTTP proxy requests
 func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
-	var start time.Time
-	if p.config.Debug {
-		start = time.Now()
-	}
+	start := time.Now()
 
 	// Ensure the URL has a scheme for proxy requests
 	if r.URL.Scheme == "" {
@@ -281,7 +273,9 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Proxy Error: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
 
 	// Remove hop-by-hop headers from response
 	removeHopByHopHeaders(resp.Header)
@@ -302,17 +296,16 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	respBytes, _ := io.CopyBuffer(w, resp.Body, buf)
 
 	if p.config.Debug {
-		log.Printf("[DEBUG] HTTP %s source=%s target=%s req_size=%d resp_status=%d resp_size=%d duration=%v",
+		log.Printf("[%s] source=%s target=%s req_size=%d resp_status=%d resp_size=%d duration=%v",
 			r.Method, r.RemoteAddr, r.URL.String(), r.ContentLength, resp.StatusCode, respBytes, time.Since(start))
+	} else {
+		log.Printf("[%s] %s %s - %v", r.Method, r.Host, r.URL.Path, time.Since(start))
 	}
 }
 
 // handleHTTPS handles CONNECT method for HTTPS tunneling
 func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
-	var start time.Time
-	if p.config.Debug {
-		start = time.Now()
-	}
+	start := time.Now()
 
 	// Connect to the target host
 	targetConn, err := net.DialTimeout("tcp", r.Host, p.config.Connection.TargetDialTimeout)
@@ -327,7 +320,7 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		log.Printf("Hijacking not supported")
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
-		targetConn.Close()
+		_ = targetConn.Close()
 		return
 	}
 
@@ -335,7 +328,7 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Error hijacking connection: %v", err)
 		http.Error(w, "Hijack failed: "+err.Error(), http.StatusInternalServerError)
-		targetConn.Close()
+		_ = targetConn.Close()
 		return
 	}
 
@@ -343,8 +336,8 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	_, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	if err != nil {
 		log.Printf("Error sending connection established: %v", err)
-		clientConn.Close()
-		targetConn.Close()
+		_ = clientConn.Close()
+		_ = targetConn.Close()
 		return
 	}
 
@@ -360,7 +353,7 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		defer bufferPool.Put(buf)
 		clientToTarget, _ = io.CopyBuffer(targetConn, clientConn, buf)
 		if tcpConn, ok := targetConn.(*net.TCPConn); ok {
-			tcpConn.CloseWrite()
+			_ = tcpConn.CloseWrite()
 		}
 	}()
 
@@ -370,17 +363,19 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		defer bufferPool.Put(buf)
 		targetToClient, _ = io.CopyBuffer(clientConn, targetConn, buf)
 		if tcpConn, ok := clientConn.(*net.TCPConn); ok {
-			tcpConn.CloseWrite()
+			_ = tcpConn.CloseWrite()
 		}
 	}()
 
 	wg.Wait()
-	clientConn.Close()
-	targetConn.Close()
+	_ = clientConn.Close()
+	_ = targetConn.Close()
 
 	if p.config.Debug {
-		log.Printf("[DEBUG] HTTPS CONNECT source=%s target=%s sent=%d recv=%d duration=%v",
-			r.RemoteAddr, r.Host, clientToTarget, targetToClient, time.Since(start))
+		log.Printf("[%s] source=%s target=%s sent=%d recv=%d duration=%v",
+			r.Method, r.RemoteAddr, r.Host, clientToTarget, targetToClient, time.Since(start))
+	} else {
+		log.Printf("[%s] %s %s - %v", r.Method, r.Host, r.URL.Path, time.Since(start))
 	}
 }
 
