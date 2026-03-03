@@ -22,13 +22,14 @@ type Config = ProxyConfig
 
 // ProxyConfig represents proxy server configuration
 type ProxyConfig struct {
-	Addr       string           `yaml:"addr"`
-	BufferSize int              `yaml:"buffer_size"`
-	Debug      bool             `yaml:"debug"`
-	Connection ConnectionConfig `yaml:"connection"`
-	Transport  TransportConfig  `yaml:"transport"`
-	Server     ServerConfig     `yaml:"server"`
-	TLS        TLSConfig        `yaml:"tls"`
+	Addr              string           `yaml:"addr"`
+	BufferSize        int              `yaml:"buffer_size"`
+	Debug             bool             `yaml:"debug"`
+	TrustProxyHeaders bool             `yaml:"trust_proxy_headers"`
+	Connection        ConnectionConfig `yaml:"connection"`
+	Transport         TransportConfig  `yaml:"transport"`
+	Server            ServerConfig     `yaml:"server"`
+	TLS               TLSConfig        `yaml:"tls"`
 }
 
 // ConnectionConfig represents connection settings
@@ -74,9 +75,10 @@ var (
 // Default configuration values
 func defaultConfig() *Config {
 	return &Config{
-		Addr:       ":8080",
-		BufferSize: 32 * 1024,
-		Debug:      false,
+		Addr:              ":8080",
+		BufferSize:        32 * 1024,
+		Debug:             false,
+		TrustProxyHeaders: true,
 		Connection: ConnectionConfig{
 			DialTimeout:       30 * time.Second,
 			KeepAlive:         30 * time.Second,
@@ -258,12 +260,20 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Remove hop-by-hop headers
 	removeHopByHopHeaders(outReq.Header)
 
-	// Set X-Forwarded headers
-	if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		if prior := outReq.Header.Get("X-Forwarded-For"); prior != "" {
-			clientIP = prior + ", " + clientIP
+	// Set X-Forwarded headers only if enabled
+	if p.config.TrustProxyHeaders {
+		if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			if prior := outReq.Header.Get("X-Forwarded-For"); prior != "" {
+				clientIP = prior + ", " + clientIP
+			}
+			outReq.Header.Set("X-Forwarded-For", clientIP)
 		}
-		outReq.Header.Set("X-Forwarded-For", clientIP)
+		if outReq.Header.Get("X-Forwarded-Proto") == "" {
+			outReq.Header.Set("X-Forwarded-Proto", outReq.URL.Scheme)
+		}
+		if outReq.Header.Get("X-Forwarded-Host") == "" {
+			outReq.Header.Set("X-Forwarded-Host", r.Host)
+		}
 	}
 
 	// Forward the request
