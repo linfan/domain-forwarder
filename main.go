@@ -350,12 +350,8 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	defer bufferPool.Put(buf)
 	respBytes, _ := io.CopyBuffer(w, resp.Body, buf)
 
-	if p.config.Debug {
-		log.Printf("[%s] source=%s target=%s req_size=%d resp_status=%d resp_size=%d duration=%v",
-			r.Method, r.RemoteAddr, r.URL.String(), r.ContentLength, resp.StatusCode, respBytes, time.Since(start))
-	} else {
-		log.Printf("[%s] %s %s - %v", r.Method, r.Host, r.URL.Path, time.Since(start))
-	}
+	log.Printf("[%s] source=%s target=%s req_size=%d resp_status=%d resp_size=%d duration=%v",
+		r.Method, r.RemoteAddr, r.URL.String(), r.ContentLength, resp.StatusCode, respBytes, time.Since(start))
 }
 
 // handleHTTPS handles CONNECT method for HTTPS tunneling
@@ -426,12 +422,8 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	_ = clientConn.Close()
 	_ = targetConn.Close()
 
-	if p.config.Debug {
-		log.Printf("[%s] source=%s target=%s sent=%d recv=%d duration=%v",
-			r.Method, r.RemoteAddr, r.Host, clientToTarget, targetToClient, time.Since(start))
-	} else {
-		log.Printf("[%s] %s %s - %v", r.Method, r.Host, r.URL.Path, time.Since(start))
-	}
+	log.Printf("[%s] source=%s target=%s sent=%d recv=%d duration=%v",
+		r.Method, r.RemoteAddr, r.Host, clientToTarget, targetToClient, time.Since(start))
 }
 
 // Hop-by-hop headers that should not be forwarded
