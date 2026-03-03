@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ type ProxyConfig struct {
 	BufferSize        int              `yaml:"buffer_size"`
 	Debug             bool             `yaml:"debug"`
 	TrustProxyHeaders bool             `yaml:"trust_proxy_headers"`
+	SourceIPBlacklist []string         `yaml:"source_ip_blacklist"`
 	Connection        ConnectionConfig `yaml:"connection"`
 	Transport         TransportConfig  `yaml:"transport"`
 	Server            ServerConfig     `yaml:"server"`
@@ -79,6 +81,7 @@ func defaultConfig() *Config {
 		BufferSize:        32 * 1024,
 		Debug:             false,
 		TrustProxyHeaders: true,
+		SourceIPBlacklist: []string{},
 		Connection: ConnectionConfig{
 			DialTimeout:       30 * time.Second,
 			KeepAlive:         30 * time.Second,
@@ -234,7 +237,49 @@ type ProxyServer struct {
 	transport *http.Transport
 }
 
+// isIPBlacklisted checks if the given IP is in the blacklist
+// Supports individual IPs and CIDR ranges
+func (p *ProxyServer) isIPBlacklisted(clientIP string) bool {
+	if len(p.config.SourceIPBlacklist) == 0 {
+		return false
+	}
+
+	// Parse the client IP
+	ip := net.ParseIP(clientIP)
+	if ip == nil {
+		return false
+	}
+
+	for _, blocked := range p.config.SourceIPBlacklist {
+		// Try to parse as CIDR range first
+		if strings.Contains(blocked, "/") {
+			_, ipNet, err := net.ParseCIDR(blocked)
+			if err == nil && ipNet.Contains(ip) {
+				return true
+			}
+		} else {
+			// Parse as individual IP
+			blockedIP := net.ParseIP(blocked)
+			if blockedIP != nil && blockedIP.Equal(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Check source IP blacklist
+	if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		if p.isIPBlacklisted(clientIP) {
+			if p.config.Debug {
+				log.Printf("[BLOCKED] source=%s - IP is blacklisted", r.RemoteAddr)
+			}
+			http.Error(w, "Forbidden: request is not allowed", http.StatusForbidden)
+			return
+		}
+	}
+
 	if r.Method == http.MethodConnect {
 		p.handleHTTPS(w, r)
 	} else {

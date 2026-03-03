@@ -5,11 +5,19 @@ addr: ":8080"
 buffer_size: 32768  # 32KB
 
 # Enable debug logging: logs source, target, request/response size for every proxied request
-debug: true
+debug: false
 
 # Enable proxy headers: adds X-Forwarded-For, X-Forwarded-Proto, X-Forwarded-Host headers
 # Set to false to hide proxy usage from target servers
 trust_proxy_headers: false
+
+# Source IP blacklist - requests from these IPs will be directly rejected
+# Supports individual IPs (e.g., "192.168.1.100") or CIDR ranges (e.g., "10.0.0.0/8")
+# Examples:
+#   - "192.168.1.100"      # Block specific IP
+#   - "10.0.0.0/8"         # Block entire private network
+#   - "172.16.0.0/12"      # Block another private network range
+source_ip_blacklist: []
 
 # Connection settings
 connection:
