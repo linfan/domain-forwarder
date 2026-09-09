@@ -348,7 +348,11 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Copy response body using buffer pool
 	buf := bufferPool.Get().([]byte)
 	defer bufferPool.Put(buf)
-	respBytes, _ := io.CopyBuffer(w, resp.Body, buf)
+	respBytes, copyErr := io.CopyBuffer(w, resp.Body, buf)
+	if copyErr != nil {
+		log.Printf("[%s] source=%s target=%s response aborted after %d bytes: %v",
+			r.Method, r.RemoteAddr, r.URL.String(), respBytes, copyErr)
+	}
 
 	log.Printf("[%s] source=%s target=%s req_size=%d resp_status=%d resp_size=%d duration=%v",
 		r.Method, r.RemoteAddr, r.URL.String(), r.ContentLength, resp.StatusCode, respBytes, time.Since(start))
@@ -397,12 +401,13 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	wg.Add(2)
 
 	var clientToTarget, targetToClient int64
+	var clientToTargetErr, targetToClientErr error
 
 	go func() {
 		defer wg.Done()
 		buf := bufferPool.Get().([]byte)
 		defer bufferPool.Put(buf)
-		clientToTarget, _ = io.CopyBuffer(targetConn, clientConn, buf)
+		clientToTarget, clientToTargetErr = io.CopyBuffer(targetConn, clientConn, buf)
 		if tcpConn, ok := targetConn.(*net.TCPConn); ok {
 			_ = tcpConn.CloseWrite()
 		}
@@ -412,7 +417,7 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		buf := bufferPool.Get().([]byte)
 		defer bufferPool.Put(buf)
-		targetToClient, _ = io.CopyBuffer(clientConn, targetConn, buf)
+		targetToClient, targetToClientErr = io.CopyBuffer(clientConn, targetConn, buf)
 		if tcpConn, ok := clientConn.(*net.TCPConn); ok {
 			_ = tcpConn.CloseWrite()
 		}
@@ -421,6 +426,15 @@ func (p *ProxyServer) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 	_ = clientConn.Close()
 	_ = targetConn.Close()
+
+	switch {
+	case clientToTargetErr != nil || targetToClientErr != nil:
+		log.Printf("[%s] source=%s target=%s tunnel aborted: client->target: %v, target->client: %v (sent=%d recv=%d duration=%v)",
+			r.Method, r.RemoteAddr, r.Host, clientToTargetErr, targetToClientErr, clientToTarget, targetToClient, time.Since(start))
+	case clientToTarget == 0 && targetToClient == 0:
+		log.Printf("[%s] source=%s target=%s tunnel closed with no data exchanged (duration=%v)",
+			r.Method, r.RemoteAddr, r.Host, time.Since(start))
+	}
 
 	log.Printf("[%s] source=%s target=%s sent=%d recv=%d duration=%v",
 		r.Method, r.RemoteAddr, r.Host, clientToTarget, targetToClient, time.Since(start))
