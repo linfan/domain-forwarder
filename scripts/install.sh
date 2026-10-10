@@ -51,7 +51,11 @@ fi
 echo "4. Copying program files..."
 cp dist/linux-amd64/domain-forwarder "$INSTALL_DIR/"
 cp dist/linux-amd64/request-printer "$INSTALL_DIR/"
-cp config.yaml "$CONFIG_DIR/"
+if [ -f "$CONFIG_DIR/config.yaml" ]; then
+    echo "   Existing configuration kept: $CONFIG_DIR/config.yaml"
+else
+    cp config.example.yaml "$CONFIG_DIR/config.yaml"
+fi
 
 # 5. Set permissions
 echo "5. Setting file permissions..."
@@ -75,7 +79,7 @@ Type=simple
 User=domain-forwarder
 Group=domain-forwarder
 WorkingDirectory=/opt/domain-forwarder
-ExecStart=/opt/domain-forwarder/domain-forwarder -config /etc/domain-forwarder/config.yaml
+ExecStart=/opt/domain-forwarder/domain-forwarder -c /etc/domain-forwarder/config.yaml
 Restart=on-failure
 RestartSec=5s
 LimitNOFILE=65536

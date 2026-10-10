@@ -35,3 +35,7 @@ vendor/
 
 # Log files
 *.log
+
+# Local runtime configuration (tracked template: config.example.yaml)
+config.yaml
+config.local.yaml

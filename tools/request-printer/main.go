@@ -42,6 +42,12 @@ var (
 	listenAddr = flag.String("addr", "", "Listen address (overrides config)")
 )
 
+// Version and BuildTime are injected at build time via -ldflags.
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+)
+
 // Default configuration values
 func defaultConfig() *Config {
 	return &Config{
@@ -101,15 +107,6 @@ func main() {
 	flag.StringVar(configFile, "c", "", "Path to config file (YAML) (shorthand)")
 	flag.Parse()
 
-	// Handle -c shorthand
-	if *configFile == "" {
-		flag.Visit(func(f *flag.Flag) {
-			if f.Name == "c" {
-				*configFile = f.Value.String()
-			}
-		})
-	}
-
 	// Load configuration
 	cfg, err := loadConfig(*configFile)
 	if err != nil {
@@ -128,6 +125,7 @@ func main() {
 	if *configFile != "" {
 		log.Printf("Loaded configuration from %s", *configFile)
 	}
+	log.Printf("Request Printer %s (built %s)", Version, BuildTime)
 	log.Printf("Starting request-printer service on %s", cfg.Addr)
 
 	server := &http.Server{

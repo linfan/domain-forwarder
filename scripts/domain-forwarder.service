@@ -13,7 +13,7 @@ Group=domain-forwarder
 WorkingDirectory=/opt/domain-forwarder
 
 # Startup command
-ExecStart=/opt/domain-forwarder/domain-forwarder -config /etc/domain-forwarder/config.yaml
+ExecStart=/opt/domain-forwarder/domain-forwarder -c /etc/domain-forwarder/config.yaml
 
 # Restart policy
 Restart=on-failure

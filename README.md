@@ -2,16 +2,23 @@
 
 A high-performance HTTP/HTTPS forward proxy server written in Go.
 
+The forwarding engine and its configuration parameters are shared with the
+sibling project `domain-dispatcher`: identical parameter names, defaults and
+streaming/timeout behavior.
+
 ## Features
 
-- **High Concurrency**: Optimized for handling thousands of concurrent connections
-- **Connection Pooling**: Efficient connection reuse with configurable pool sizes
-- **Buffer Pooling**: Memory-efficient data transfer using `sync.Pool`
-- **HTTP & HTTPS Support**: Full support for both HTTP forwarding and HTTPS tunneling (CONNECT method)
-- **Hop-by-hop Header Handling**: Properly removes proxy-specific headers
-- **X-Forwarded-For**: Tracks original client IP addresses
-- **Graceful Shutdown**: Clean shutdown on SIGINT/SIGTERM
-- **YAML Configuration**: Flexible configuration via YAML file
+- **HTTP & HTTPS**: Plain HTTP forwarding plus HTTPS tunneling via the CONNECT method
+- **High concurrency**: Connection pooling with configurable pool sizes
+- **Buffer pooling**: Memory-efficient data transfer using `sync.Pool`
+- **Hop-by-hop header handling**: RFC 7230-compliant header stripping, including `Connection`-listed tokens
+- **X-Forwarded-For**: Optionally tracks the original client address (`add_proxy_headers`)
+- **SSE-aware forwarding**: Streaming responses are flushed chunk by chunk and pass through uncompressed
+- **Timeouts**: Upstream dial/header/body-idle/body-duration and server read-header/idle timeouts are all configurable
+- **Source IP blacklist**: Reject individual IPs or CIDR ranges with 403
+- **Graceful shutdown**: SIGINT/SIGTERM drains in-flight requests within `server.shutdown_timeout`
+- **Optional file logging**: Size-based rotation via `log`
+- **YAML configuration**: All values optional; built-in defaults apply when no config file is given
 
 ## Quick Start
 
@@ -19,30 +26,15 @@ A high-performance HTTP/HTTPS forward proxy server written in Go.
 # Build all binaries
 make build
 
-# Run the proxy server (default port: 8080)
-make run-proxy
+# Create your local config from the tracked template (config.yaml is gitignored)
+cp config.example.yaml config.yaml
 
-# Or run with config file
-./build/proxy -c config.yaml
+# Run the proxy server with the local config (address :8080)
+make run
 
-# Or run directly with custom port
-./build/proxy -addr :3128
-```
-
-## Usage
-
-### Proxy Server
-
-```bash
-# Start proxy with default settings
-./build/proxy
-
-# Start proxy with config file
-./build/proxy --config config.yaml
-./build/proxy -c config.yaml
-
-# Override config with command-line flag
-./build/proxy -c config.yaml -addr :3128
+# Or run with a config file / custom address
+./build/domain-forwarder -c config.yaml
+./build/domain-forwarder -addr :3128
 ```
 
 ### Using the Proxy
@@ -59,130 +51,114 @@ export http_proxy=http://localhost:8080
 export https_proxy=http://localhost:8080
 ```
 
+## Command-line Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c, --config` | - | Path to YAML config file; built-in defaults apply when omitted |
+| `-addr` | `:8080` | Proxy listen address (overrides config) |
+| `--version` | - | Print version and build time, then exit |
+
+Exit codes: `0` after a graceful SIGINT/SIGTERM shutdown, `1` when the listener
+fails or the configuration is invalid.
+
 ## Configuration
 
-Both services support configuration via YAML file. Use `--config` or `-c` to specify the config file path.
-
-### Config File (config.yaml)
+See `config.example.yaml` for the fully annotated reference. Every value shown there is
+the built-in default, so an omitted key keeps its default. A minimal example:
 
 ```yaml
-# Proxy server configuration
-proxy:
-  addr: ":8080"
-  buffer_size: 32768  # 32KB
-  
-  connection:
-    dial_timeout: 30s
-    keep_alive: 30s
-    target_dial_timeout: 30s
-  
-  transport:
-    max_idle_conns: 1000
-    max_idle_conns_per_host: 100
-    max_conns_per_host: 0  # No limit
-    idle_conn_timeout: 90s
-    tls_handshake_timeout: 10s
-    expect_continue_timeout: 1s
-    response_header_timeout: 30s
-    force_attempt_http2: true
-    disable_compression: false
-  
-  server:
-    read_header_timeout: 10s
-    idle_timeout: 120s
-    max_header_bytes: 1048576  # 1MB
-    shutdown_timeout: 30s
+addr: ":8080"
+debug: false
+add_proxy_headers: false
 
-# Request printer configuration
-request_printer:
-  addr: ":9090"
-  max_body_read: 10485760  # 10MB
-  
-  server:
-    read_timeout: 30s
-    write_timeout: 30s
-    idle_timeout: 60s
-    read_header_timeout: 10s
-    max_header_bytes: 1048576  # 1MB
-    shutdown_timeout: 10s
+source_ip_blacklist:
+  - 203.0.113.7
+  - 192.168.0.0/16
+
+forward:
+  dial_timeout: 10s              # also used for CONNECT tunnel dialing
+  dial_keep_alive: 30s
+  request_timeout: 60s           # max wait for upstream response headers
+  stream_idle_timeout: 120s      # abort a body that stalls this long (0s = off)
+  response_body_timeout: 300s    # total cap for non-streaming bodies (0s = off)
+  disable_compression: true
+
+server:
+  idle_timeout: 120s
+  shutdown_timeout: 30s
+
+log:                             # optional; omit for stderr
+  dir: /var/log/domain-forwarder
+  filename: app.log
+
+tls:                             # serve proxy clients over HTTPS
+  enabled: false
+  cert_file: /path/to/server.crt
+  key_file: /path/to/server.key
 ```
 
-### Command-line Options
+### Configuration Fields
 
-#### Proxy Server
+- `addr`: Proxy listen address
+- `debug`: Print extra per-request detail logs (the summary line is always printed)
+- `add_proxy_headers`: Add `X-Forwarded-For`/`X-Forwarded-Proto`/`X-Forwarded-Host` to forwarded requests
+- `source_ip_blacklist`: Client IPs or CIDR ranges rejected with 403
+- `forward`: Shared forwarding-engine parameters (connection pool, dial/TLS
+  timeouts, `request_timeout`, `stream_idle_timeout`, `response_body_timeout`,
+  `streaming_flush`, `disable_compression`, `force_attempt_http2`,
+  `buffer_size`) — same names and defaults as `domain-dispatcher`
+- `server`: HTTP server settings (`read_header_timeout`, `idle_timeout`,
+  `max_header_bytes`, `shutdown_timeout`)
+- `log`: Optional file logging with rotation (`dir`, `filename`, `max_size` MB,
+  `max_backups`); logs go to stderr when `dir`/`filename` are empty
+- `tls`: TLS for the proxy's own listener (`enabled`, `cert_file`, `key_file`);
+  startup validation fails if the files do not exist
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-c, --config` | - | Path to YAML config file |
-| `-addr` | `:8080` | Listen address (overrides config) |
+Precedence: command-line flags > config file > built-in defaults.
 
-#### Request Printer
+## Request Forwarding Details
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-c, --config` | - | Path to YAML config file |
-| `-addr` | `:9090` | Listen address (overrides config) |
-
-### Configuration Precedence
-
-1. Command-line flags (highest priority)
-2. Config file values
-3. Default values (lowest priority)
+- **Method**: Preserved for HTTP; `CONNECT` opens a raw TCP tunnel
+- **Headers**: Hop-by-hop headers are stripped in both directions, including the
+  tokens listed in a `Connection` header. The client's `Accept-Encoding` is
+  forwarded as-is (a forward proxy stays transparent)
+- **Body**: Forwarded as-is, preserving `Content-Length`
+- **Streaming**: `text/event-stream` responses are flushed chunk by chunk
+- **Tunnels**: CONNECT tunnels use `forward.dial_timeout` /
+  `forward.dial_keep_alive` and reuse the engine's buffer pool
+- **Failures**: A forwarding failure before the response starts returns 502 Bad
+  Gateway; failures after the response has started are only logged
 
 ## Tools
 
 ### request-printer
 
-A utility service for testing and debugging proxy requests. It logs all incoming request details in JSON format.
+A utility service for testing and debugging proxy requests. It logs all
+incoming request details in JSON format.
 
 ```bash
-# Start with default settings
+# Start with default settings (port 9090)
 make run-printer
 
-# Start with config file
-./build/request-printer -c config.yaml
-
-# Override listen address
-./build/request-printer -c config.yaml -addr :9999
+# Start with config file / custom address
+./build/request-printer -c printer.yaml
+./build/request-printer -addr :9999
 ```
 
-**Output includes:**
-- Timestamp
-- Source IP and port
-- HTTP method, URL, protocol
-- All request headers
-- Body size
-- Body preview (first/last 50 chars if >100 characters)
-
-**Example output:**
-```json
-{
-  "timestamp": "2026-02-01T12:00:00.000000+08:00",
-  "source_ip": "127.0.0.1",
-  "source_port": "50681",
-  "method": "POST",
-  "url": "/test?foo=bar",
-  "proto": "HTTP/1.1",
-  "host": "localhost:9090",
-  "headers": {
-    "Content-Type": "application/json",
-    "User-Agent": "curl/8.7.1"
-  },
-  "body_size": 150,
-  "body_preview": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-}
-```
+**Output includes:** timestamp, source IP/port, method, URL, protocol, all
+headers, body size, and a body preview (first/last 50 chars if >100 chars).
 
 ## Building
 
 ### Local Build
 
 ```bash
-# Build all for current platform
+# Build all binaries for the current platform
 make build
 
-# Build only proxy
-make proxy
+# Build only the proxy
+make forwarder
 
 # Build only request-printer
 make request-printer
@@ -195,8 +171,6 @@ make help
 ```
 
 ### Cross-Platform Build
-
-Build binaries for different platforms:
 
 ```bash
 # Build for Linux (amd64)
@@ -222,46 +196,66 @@ make release
 ```
 
 Build artifacts:
-- Platform-specific binaries: `dist/<platform>-<arch>/`
+
+- Local: `build/domain-forwarder`, `build/request-printer`
+- Platform-specific: `dist/<platform>-<arch>/`
 - Release archives: `dist/domain-forwarder-<version>-<platform>-<arch>.tar.gz`
 
+Version and build time are injected via `-ldflags` (`git describe` /
+UTC timestamp) and printed by `--version` and at startup.
 
 ## Testing
 
 ```bash
-# Run automated tests (starts both services, sends test requests)
+# Run automated integration tests (starts both services, sends test requests)
 make test
 ```
+
+## Deployment
+
+Scripted installation on Linux (systemd service, dedicated user):
+
+```bash
+make build-linux
+sudo ./scripts/install.sh
+```
+
+See [DEPLOY.md](DEPLOY.md) for manual deployment, service management and
+troubleshooting. Removal: `sudo ./scripts/uninstall.sh`.
 
 ## Project Structure
 
 ```
-tiny-http-proxy/
-├── main.go                      # Proxy server implementation
-├── go.mod                       # Go module definition
-├── go.sum                       # Go module checksums
-├── config.yaml                  # Configuration file
+domain-forwarder/
+├── main.go                      # Flags, startup, graceful shutdown
+├── config.go                    # Configuration types, defaults, loading, validation
+├── pkg/
+│   ├── proxy/proxy.go           # Forward proxy handler (CONNECT tunnel + HTTP)
+│   └── forwarder/forwarder.go   # Shared forwarding engine (kept in sync with domain-dispatcher)
+├── tools/request-printer/       # Test/debug request logger
+├── config.example.yaml          # Annotated config template (copy to config.yaml)
 ├── Makefile                     # Build automation
-├── README.md                    # This file
-└── tools/
-    └── request-printer/
-        └── main.go              # Request printer service
+├── scripts/                     # install.sh / uninstall.sh / service file
+├── DEPLOY.md                    # Deployment guide
+└── README.md                    # This file
 ```
 
 ## Performance Tuning
 
-The proxy is configured with these defaults for high performance:
+The engine ships with these defaults:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `buffer_size` | 32KB | Data transfer buffer size |
 | `max_idle_conns` | 1000 | Total idle connections in pool |
 | `max_idle_conns_per_host` | 100 | Idle connections per host |
+| `max_conns_per_host` | 0 | Total connections per host (0 = unlimited) |
 | `idle_conn_timeout` | 90s | How long connections stay idle |
 | `tls_handshake_timeout` | 10s | TLS handshake timeout |
 | `force_attempt_http2` | true | Enable HTTP/2 support |
-| `buffer_size` | 32KB | Data transfer buffer size |
 
-Adjust these values in `config.yaml` based on your workload.
+Adjust these values in the `forward` section of `config.yaml` based on your
+workload.
 
 ## License
 

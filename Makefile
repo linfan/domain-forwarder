@@ -1,5 +1,5 @@
-.PHONY: all build clean proxy request-printer test run-proxy run-printer
-.PHONY: build-linux build-macos build-windows build-all help
+.PHONY: all build forwarder request-printer clean test run run-printer
+.PHONY: build-linux build-linux-arm64 build-macos build-macos-arm64 build-windows build-all release install help
 
 # Build output directory
 BUILD_DIR := build
@@ -8,6 +8,12 @@ DIST_DIR := dist
 # Binary names
 BINARY_NAME := domain-forwarder
 PRINTER_NAME := request-printer
+
+# Local runtime configuration used by `make run` (gitignored; copy from the template)
+CONFIG_FILE := config.yaml
+
+# Configuration template bundled with cross-platform builds
+CONFIG_TEMPLATE := config.example.yaml
 
 # Version info
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -24,10 +30,10 @@ help:
 	@echo "Domain Forwarder - Makefile Commands"
 	@echo ""
 	@echo "Development:"
-	@echo "  make build              - Build for current platform"
+	@echo "  make build              - Build all binaries for current platform"
 	@echo "  make clean              - Clean build artifacts"
 	@echo "  make test               - Run integration tests"
-	@echo "  make run-proxy          - Run proxy server (port 8080)"
+	@echo "  make run                - Run proxy server with config.yaml (port 8080)"
 	@echo "  make run-printer        - Run request printer (port 9090)"
 	@echo ""
 	@echo "Cross-platform Builds:"
@@ -45,36 +51,34 @@ help:
 	@echo "Version: $(VERSION)"
 	@echo "Build Time: $(BUILD_TIME)"
 
-build: proxy request-printer
+build: forwarder request-printer
 
-proxy:
+forwarder:
 	@mkdir -p $(BUILD_DIR)
-	go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(BUILD_DIR)/proxy .
+	go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) .
 
 request-printer:
 	@mkdir -p $(BUILD_DIR)
-	go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(BUILD_DIR)/request-printer ./tools/request-printer
+	go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(BUILD_DIR)/$(PRINTER_NAME) ./tools/request-printer
 
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf $(DIST_DIR)
-	rm -f proxy request-printer
-	rm -f tools/request-printer/request-printer
 
 # Run targets
-run-proxy: proxy
-	$(BUILD_DIR)/proxy -addr :8080
+run: forwarder
+	$(BUILD_DIR)/$(BINARY_NAME) -c $(CONFIG_FILE)
 
 run-printer: request-printer
-	$(BUILD_DIR)/request-printer -addr :9090
+	$(BUILD_DIR)/$(PRINTER_NAME) -addr :9090
 
 # Test the proxy with request-printer
 test: build
 	@echo "Starting request-printer on :9090..."
-	@$(BUILD_DIR)/request-printer -addr :9090 & echo $$! > /tmp/printer.pid
+	@$(BUILD_DIR)/$(PRINTER_NAME) -addr :9090 & echo $$! > /tmp/printer.pid
 	@sleep 1
 	@echo "Starting proxy on :8080..."
-	@$(BUILD_DIR)/proxy -addr :8080 & echo $$! > /tmp/proxy.pid
+	@$(BUILD_DIR)/$(BINARY_NAME) -addr :8080 & echo $$! > /tmp/proxy.pid
 	@sleep 1
 	@echo "\n=== Testing HTTP proxy ==="
 	@curl -s -x http://localhost:8080 'http://localhost:9090/test?foo=bar' | head -20
@@ -88,8 +92,8 @@ test: build
 
 # Install to GOPATH/bin
 install: build
-	cp $(BUILD_DIR)/proxy $(GOPATH)/bin/tiny-http-proxy
-	cp $(BUILD_DIR)/request-printer $(GOPATH)/bin/request-printer
+	cp $(BUILD_DIR)/$(BINARY_NAME) $(GOPATH)/bin/$(BINARY_NAME)
+	cp $(BUILD_DIR)/$(PRINTER_NAME) $(GOPATH)/bin/$(PRINTER_NAME)
 
 # Cross-platform builds
 build-linux:
@@ -97,8 +101,7 @@ build-linux:
 	@mkdir -p $(DIST_DIR)/linux-amd64
 	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/linux-amd64/$(BINARY_NAME) .
 	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/linux-amd64/$(PRINTER_NAME) ./tools/request-printer
-	@echo "Copying config file..."
-	@cp config.yaml $(DIST_DIR)/linux-amd64/
+	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/linux-amd64/
 	@echo "Linux build complete: $(DIST_DIR)/linux-amd64/"
 
 build-linux-arm64:
@@ -106,7 +109,7 @@ build-linux-arm64:
 	@mkdir -p $(DIST_DIR)/linux-arm64
 	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/linux-arm64/$(BINARY_NAME) .
 	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/linux-arm64/$(PRINTER_NAME) ./tools/request-printer
-	@cp config.yaml $(DIST_DIR)/linux-arm64/
+	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/linux-arm64/
 	@echo "Linux ARM64 build complete: $(DIST_DIR)/linux-arm64/"
 
 build-macos:
@@ -114,7 +117,7 @@ build-macos:
 	@mkdir -p $(DIST_DIR)/darwin-amd64
 	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/darwin-amd64/$(BINARY_NAME) .
 	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/darwin-amd64/$(PRINTER_NAME) ./tools/request-printer
-	@cp config.yaml $(DIST_DIR)/darwin-amd64/
+	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/darwin-amd64/
 	@echo "macOS (Intel) build complete: $(DIST_DIR)/darwin-amd64/"
 
 build-macos-arm64:
@@ -122,7 +125,7 @@ build-macos-arm64:
 	@mkdir -p $(DIST_DIR)/darwin-arm64
 	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/darwin-arm64/$(BINARY_NAME) .
 	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/darwin-arm64/$(PRINTER_NAME) ./tools/request-printer
-	@cp config.yaml $(DIST_DIR)/darwin-arm64/
+	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/darwin-arm64/
 	@echo "macOS (Apple Silicon) build complete: $(DIST_DIR)/darwin-arm64/"
 
 build-windows:
@@ -130,7 +133,7 @@ build-windows:
 	@mkdir -p $(DIST_DIR)/windows-amd64
 	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/windows-amd64/$(BINARY_NAME).exe .
 	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/windows-amd64/$(PRINTER_NAME).exe ./tools/request-printer
-	@cp config.yaml $(DIST_DIR)/windows-amd64/
+	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/windows-amd64/
 	@echo "Windows build complete: $(DIST_DIR)/windows-amd64/"
 
 # Build for all platforms
