@@ -1,262 +1,132 @@
 # Domain Forwarder
 
-A high-performance HTTP/HTTPS forward proxy server written in Go.
+[English](README_EN.md)
 
-The forwarding engine and its configuration parameters are shared with the
-sibling project `domain-dispatcher`: identical parameter names, defaults and
-streaming/timeout behavior.
+使用 Go 编写的高性能 HTTP/HTTPS 正向代理服务器。
 
-## Features
+> 构建、配置参考、性能调优、部署与运维内容请见 [DEPLOY.md](DEPLOY.md)。
 
-- **HTTP & HTTPS**: Plain HTTP forwarding plus HTTPS tunneling via the CONNECT method
-- **High concurrency**: Connection pooling with configurable pool sizes
-- **Buffer pooling**: Memory-efficient data transfer using `sync.Pool`
-- **Hop-by-hop header handling**: RFC 7230-compliant header stripping, including `Connection`-listed tokens
-- **X-Forwarded-For**: Optionally tracks the original client address (`add_proxy_headers`)
-- **SSE-aware forwarding**: Streaming responses are flushed chunk by chunk and pass through uncompressed
-- **Timeouts**: Upstream dial/header/body-idle/body-duration and server read-header/idle timeouts are all configurable
-- **Source IP blacklist**: Reject individual IPs or CIDR ranges with 403
-- **Graceful shutdown**: SIGINT/SIGTERM drains in-flight requests within `server.shutdown_timeout`
-- **Optional file logging**: Size-based rotation via `log`
-- **YAML configuration**: All values optional; built-in defaults apply when no config file is given
+## 功能特性
 
-## Quick Start
+- **HTTP 与 HTTPS**：支持明文 HTTP 转发，并通过 CONNECT 方法建立 HTTPS 隧道
+- **高并发**：连接池容量可配置
+- **缓冲区复用**：基于 `sync.Pool` 实现省内存的数据搬运
+- **逐跳头处理**：按 RFC 7230 剥离逐跳头（hop-by-hop header），包括 `Connection`
+  头中列出的字段
+- **X-Forwarded-For**：可选记录客户端原始地址（`add_proxy_headers`）
+- **SSE 友好转发**：流式响应逐块 flush，并以不压缩的方式透传
+- **超时控制**：上游连接/响应头/响应体空闲/响应体总时长，以及服务端读请求头/空闲
+  超时均可配置
+- **源 IP 黑名单**：可拒绝单个 IP 或 CIDR 网段，返回 403
+- **优雅退出**：收到 SIGINT/SIGTERM 后在 `server.shutdown_timeout` 内处理完在途请求
+- **可选文件日志**：通过 `log` 段按大小滚动
+- **YAML 配置**：所有配置项均可省略，不提供配置文件时使用内置默认值
+
+## 快速开始
 
 ```bash
-# Build all binaries
+# 构建全部二进制文件
 make build
 
-# Create your local config from the tracked template (config.yaml is gitignored)
+# 从纳入版本管理的模板生成本地配置（config.yaml 已被 gitignore）
 cp config.example.yaml config.yaml
 
-# Run the proxy server with the local config (address :8080)
+# 使用本地配置启动代理服务（监听 :8080）
 make run
 
-# Or run with a config file / custom address
+# 或者指定配置文件 / 自定义监听地址
 ./build/domain-forwarder -c config.yaml
 ./build/domain-forwarder -addr :3128
 ```
 
-### Using the Proxy
+### 使用代理
 
 ```bash
-# HTTP request via proxy
+# 通过代理发起 HTTP 请求
 curl -x http://localhost:8080 http://example.com
 
-# HTTPS request via proxy
+# 通过代理发起 HTTPS 请求
 curl -x http://localhost:8080 https://example.com
 
-# Set as environment variable
+# 设置为环境变量
 export http_proxy=http://localhost:8080
 export https_proxy=http://localhost:8080
 ```
 
-## Command-line Options
+## 命令行选项
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-c, --config` | - | Path to YAML config file; built-in defaults apply when omitted |
-| `-addr` | `:8080` | Proxy listen address (overrides config) |
-| `--version` | - | Print version and build time, then exit |
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-c, --config` | 无 | YAML 配置文件路径；省略时使用内置默认值 |
+| `-addr` | `:8080` | 代理监听地址（优先级高于配置文件） |
+| `--version` | - | 打印版本号与构建时间后退出 |
 
-Exit codes: `0` after a graceful SIGINT/SIGTERM shutdown, `1` when the listener
-fails or the configuration is invalid.
+## 配置
 
-## Configuration
+`config.example.yaml` 是带完整注释的配置参考：其中每一项都是内置默认值，因此
+省略某个键就沿用默认值。优先级为：命令行参数 > 配置文件 > 内置默认值。
 
-See `config.example.yaml` for the fully annotated reference. Every value shown there is
-the built-in default, so an omitted key keeps its default. A minimal example:
+配置分为以下几部分：
 
-```yaml
-addr: ":8080"
-debug: false
-add_proxy_headers: false
+- 顶层：`addr`、`debug`、`add_proxy_headers`、`source_ip_blacklist`
+- `forward`：转发引擎参数（连接池容量、连接/TLS/响应头超时、
+  `request_timeout`、`stream_idle_timeout`、`response_body_timeout`、
+  `streaming_flush`、`disable_compression`、`force_attempt_http2`、
+  `buffer_size`）
+- `server`：代理监听地址对应的 HTTP 服务器参数
+- `log`：可选的文件日志与按大小滚动（未配置时输出到 stderr）
+- `tls`：为代理自身的监听端口启用 TLS
 
-source_ip_blacklist:
-  - 203.0.113.7
-  - 192.168.0.0/16
+各字段的默认值、校验规则与调优建议见 [DEPLOY.md](DEPLOY.md)。
 
-forward:
-  dial_timeout: 10s              # also used for CONNECT tunnel dialing
-  dial_keep_alive: 30s
-  request_timeout: 60s           # max wait for upstream response headers
-  stream_idle_timeout: 120s      # abort a body that stalls this long (0s = off)
-  response_body_timeout: 300s    # total cap for non-streaming bodies (0s = off)
-  disable_compression: true
+## 请求转发行为
 
-server:
-  idle_timeout: 120s
-  shutdown_timeout: 30s
+- **方法**：HTTP 请求原样保留方法；`CONNECT` 建立原始 TCP 隧道
+- **请求头**：双向剥离逐跳头，包括 `Connection` 头中列出的字段。客户端的
+  `Accept-Encoding` 原样转发（正向代理保持透明）
+- **请求体**：原样转发，并保留 `Content-Length`
+- **流式响应**：`text/event-stream` 响应逐块 flush
+- **隧道**：CONNECT 隧道使用 `forward.dial_timeout` / `forward.dial_keep_alive`，
+  并复用引擎的缓冲区池
+- **失败处理**：响应开始前转发失败返回 502 Bad Gateway；响应已经开始后的失败
+  仅记录日志
 
-log:                             # optional; omit for stderr
-  dir: /var/log/domain-forwarder
-  filename: app.log
+## 内置工具
 
-tls:                             # serve proxy clients over HTTPS
-  enabled: false
-  cert_file: /path/to/server.crt
-  key_file: /path/to/server.key
+`tools/request-printer` 是一个配套服务，把收到的每个请求以 JSON 格式记录到日志，
+便于查看代理实际转发到上游的内容（`make run-printer`）。它的配置说明以及
+`make test` 集成测试见 [DEPLOY.md](DEPLOY.md#testing-utilities)。
+
+## 项目结构
+
+```
+domain-forwarder/
+├── main.go                      # 命令行参数、启动流程、优雅退出
+├── config.go                    # 配置类型、默认值、加载与校验
+├── pkg/
+│   ├── proxy/proxy.go           # 正向代理处理器（CONNECT 隧道 + HTTP 转发）
+│   └── forwarder/forwarder.go   # 共用转发引擎（与 domain-dispatcher 保持同步）
+├── tools/request-printer/       # 调试用请求日志服务
+├── config.example.yaml          # 带注释的配置模板（复制为 config.yaml）
+├── Makefile                     # 构建自动化
+├── scripts/                     # install.sh / uninstall.sh / systemd 服务文件
+├── DEPLOY.md                    # 部署与运维指南
+├── README.md                    # 本文档（中文）
+└── README_EN.md                 # 英文文档
 ```
 
-### Configuration Fields
+## 部署
 
-- `addr`: Proxy listen address
-- `debug`: Print extra per-request detail logs (the summary line is always printed)
-- `add_proxy_headers`: Add `X-Forwarded-For`/`X-Forwarded-Proto`/`X-Forwarded-Host` to forwarded requests
-- `source_ip_blacklist`: Client IPs or CIDR ranges rejected with 403
-- `forward`: Shared forwarding-engine parameters (connection pool, dial/TLS
-  timeouts, `request_timeout`, `stream_idle_timeout`, `response_body_timeout`,
-  `streaming_flush`, `disable_compression`, `force_attempt_http2`,
-  `buffer_size`) — same names and defaults as `domain-dispatcher`
-- `server`: HTTP server settings (`read_header_timeout`, `idle_timeout`,
-  `max_header_bytes`, `shutdown_timeout`)
-- `log`: Optional file logging with rotation (`dir`, `filename`, `max_size` MB,
-  `max_backups`); logs go to stderr when `dir`/`filename` are empty
-- `tls`: TLS for the proxy's own listener (`enabled`, `cert_file`, `key_file`);
-  startup validation fails if the files do not exist
-
-Precedence: command-line flags > config file > built-in defaults.
-
-## Request Forwarding Details
-
-- **Method**: Preserved for HTTP; `CONNECT` opens a raw TCP tunnel
-- **Headers**: Hop-by-hop headers are stripped in both directions, including the
-  tokens listed in a `Connection` header. The client's `Accept-Encoding` is
-  forwarded as-is (a forward proxy stays transparent)
-- **Body**: Forwarded as-is, preserving `Content-Length`
-- **Streaming**: `text/event-stream` responses are flushed chunk by chunk
-- **Tunnels**: CONNECT tunnels use `forward.dial_timeout` /
-  `forward.dial_keep_alive` and reuse the engine's buffer pool
-- **Failures**: A forwarding failure before the response starts returns 502 Bad
-  Gateway; failures after the response has started are only logged
-
-## Tools
-
-### request-printer
-
-A utility service for testing and debugging proxy requests. It logs all
-incoming request details in JSON format.
-
-```bash
-# Start with default settings (port 9090)
-make run-printer
-
-# Start with config file / custom address
-./build/request-printer -c printer.yaml
-./build/request-printer -addr :9999
-```
-
-**Output includes:** timestamp, source IP/port, method, URL, protocol, all
-headers, body size, and a body preview (first/last 50 chars if >100 chars).
-
-## Building
-
-### Local Build
-
-```bash
-# Build all binaries for the current platform
-make build
-
-# Build only the proxy
-make forwarder
-
-# Build only request-printer
-make request-printer
-
-# Clean build artifacts
-make clean
-
-# View all available commands
-make help
-```
-
-### Cross-Platform Build
-
-```bash
-# Build for Linux (amd64)
-make build-linux
-
-# Build for Linux (arm64)
-make build-linux-arm64
-
-# Build for macOS (Intel)
-make build-macos
-
-# Build for macOS (Apple Silicon)
-make build-macos-arm64
-
-# Build for Windows
-make build-windows
-
-# Build for all platforms at once
-make build-all
-
-# Create release archives (tar.gz for Linux/macOS, zip for Windows)
-make release
-```
-
-Build artifacts:
-
-- Local: `build/domain-forwarder`, `build/request-printer`
-- Platform-specific: `dist/<platform>-<arch>/`
-- Release archives: `dist/domain-forwarder-<version>-<platform>-<arch>.tar.gz`
-
-Version and build time are injected via `-ldflags` (`git describe` /
-UTC timestamp) and printed by `--version` and at startup.
-
-## Testing
-
-```bash
-# Run automated integration tests (starts both services, sends test requests)
-make test
-```
-
-## Deployment
-
-Scripted installation on Linux (systemd service, dedicated user):
+Linux 一键安装（systemd 服务、独立运行用户）：
 
 ```bash
 make build-linux
 sudo ./scripts/install.sh
 ```
 
-See [DEPLOY.md](DEPLOY.md) for manual deployment, service management and
-troubleshooting. Removal: `sudo ./scripts/uninstall.sh`.
+手动部署、服务管理、日志查看与故障排查见 [DEPLOY.md](DEPLOY.md)。
+卸载：`sudo ./scripts/uninstall.sh`。
 
-## Project Structure
-
-```
-domain-forwarder/
-├── main.go                      # Flags, startup, graceful shutdown
-├── config.go                    # Configuration types, defaults, loading, validation
-├── pkg/
-│   ├── proxy/proxy.go           # Forward proxy handler (CONNECT tunnel + HTTP)
-│   └── forwarder/forwarder.go   # Shared forwarding engine (kept in sync with domain-dispatcher)
-├── tools/request-printer/       # Test/debug request logger
-├── config.example.yaml          # Annotated config template (copy to config.yaml)
-├── Makefile                     # Build automation
-├── scripts/                     # install.sh / uninstall.sh / service file
-├── DEPLOY.md                    # Deployment guide
-└── README.md                    # This file
-```
-
-## Performance Tuning
-
-The engine ships with these defaults:
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `buffer_size` | 32KB | Data transfer buffer size |
-| `max_idle_conns` | 1000 | Total idle connections in pool |
-| `max_idle_conns_per_host` | 100 | Idle connections per host |
-| `max_conns_per_host` | 0 | Total connections per host (0 = unlimited) |
-| `idle_conn_timeout` | 90s | How long connections stay idle |
-| `tls_handshake_timeout` | 10s | TLS handshake timeout |
-| `force_attempt_http2` | true | Enable HTTP/2 support |
-
-Adjust these values in the `forward` section of `config.yaml` based on your
-workload.
-
-## License
+## 许可
 
 MIT

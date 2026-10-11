@@ -1,16 +1,23 @@
 # Domain Forwarder Deployment Guide
 
-This document describes deploying Domain Forwarder as a systemd service on
-Linux systems.
+This document covers building, configuring, tuning, deploying and operating
+Domain Forwarder, including running it as a systemd service on Linux. For an
+introduction to the project itself, see [README.md](README.md)
+(English: [README_EN.md](README_EN.md)).
 
 ## Table of Contents
 
 - [Building Binaries](#building-binaries)
+- [Configuration Reference](#configuration-reference)
+- [Performance Tuning](#performance-tuning)
 - [Linux Service Deployment](#linux-service-deployment)
   - [Method 1: Manual Deployment](#method-1-manual-deployment)
   - [Method 2: Using Installation Script](#method-2-using-installation-script)
 - [Service Management](#service-management)
 - [Log Viewing](#log-viewing)
+- [Testing Utilities](#testing-utilities)
+  - [request-printer](#request-printer)
+  - [Integration Tests](#integration-tests)
 - [Troubleshooting](#troubleshooting)
 - [Uninstallation](#uninstallation)
 
@@ -18,7 +25,33 @@ Linux systems.
 
 ## Building Binaries
 
-Run the following in the project root to build for each platform:
+### Local Build
+
+Build for the current platform in the project root:
+
+```bash
+# Build all binaries
+make build
+
+# Build only the proxy / only request-printer
+make forwarder
+make request-printer
+
+# Remove build artifacts (build/ and dist/)
+make clean
+
+# Install the binaries into $GOPATH/bin
+make install
+
+# List every available target
+make help
+```
+
+Local binaries are written to `build/domain-forwarder` and
+`build/request-printer`. `make run` starts the proxy with the local
+`config.yaml` (copy it from `config.example.yaml` first).
+
+### Cross-Platform Build
 
 ```bash
 # Build Linux (amd64) version
@@ -33,7 +66,7 @@ make build-macos
 # Build macOS (Apple Silicon) version
 make build-macos-arm64
 
-# Build Windows version
+# Build Windows (amd64) version
 make build-windows
 
 # Build all platform versions at once
@@ -46,10 +79,79 @@ make release
 Build output locations:
 
 - Platform binaries: `dist/<platform>-<arch>/domain-forwarder` and
-  `dist/<platform>-<arch>/request-printer` (each directory also contains `config.yaml`)
+  `dist/<platform>-<arch>/request-printer` (each directory also contains the
+  `config.example.yaml` template)
 - Release archives: `dist/domain-forwarder-<version>-<platform>-<arch>.tar.gz` (zip for Windows)
 
+### Version Info
+
+Version and build time are injected via `-ldflags` (`git describe` and a UTC
+timestamp) and printed by `--version` and in the startup log.
+
 ---
+
+## Configuration Reference
+
+The full annotated reference is `config.example.yaml`, which is bundled with
+every build and release archive. Every value in that template is the built-in
+default, so an omitted key keeps its default and running without `-c` starts
+with all defaults. Precedence: command-line flags > config file > built-in
+defaults.
+
+| Section / key | Default | Description |
+|---------------|---------|-------------|
+| `addr` | `:8080` | Proxy listen address; the port must be 1–65535 |
+| `debug` | `false` | Extra per-request detail logs (the one-line request summary is always printed) |
+| `add_proxy_headers` | `false` | Add `X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` to forwarded requests |
+| `source_ip_blacklist` | empty | Client IPs or CIDR ranges rejected with 403 |
+| `forward` | see below | Shared forwarding-engine parameters (pool, timeouts, streaming) |
+| `server` | see below | HTTP server settings for the proxy listener |
+| `log` | stderr | Optional file logging with size-based rotation (`dir`, `filename`, `max_size`, `max_backups`) |
+| `tls` | disabled | TLS for the proxy's own listener (`enabled`, `cert_file`, `key_file`) |
+
+`forward` keys: `buffer_size`, `max_idle_conns`, `max_idle_conns_per_host`,
+`max_conns_per_host`, `idle_conn_timeout`, `tls_handshake_timeout`,
+`expect_continue_timeout`, `response_header_timeout`, `dial_timeout`,
+`dial_keep_alive`, `request_timeout`, `stream_idle_timeout`,
+`response_body_timeout`, `streaming_flush`, `disable_compression`,
+`force_attempt_http2`. `stream_idle_timeout` and `response_body_timeout`
+default to `0s` (disabled); `streaming_flush`, `disable_compression` and
+`force_attempt_http2` default to `true`.
+
+`server` keys: `read_header_timeout` (10s), `idle_timeout` (120s),
+`max_header_bytes` (1MB), `shutdown_timeout` (30s).
+
+Startup validation exits with code `1` and a precise message for: an
+ill-formed `addr` or an out-of-range port, a non-positive
+`forward.buffer_size` / `server.max_header_bytes`, a negative duration or
+pool size, an invalid blacklist entry (neither an IP nor a CIDR range), or a
+missing certificate/key when `tls.enabled` is true. `0` is returned after a
+graceful SIGINT/SIGTERM shutdown.
+
+---
+
+## Performance Tuning
+
+The engine ships with these defaults; adjust them in the `forward` section of
+the configuration according to your workload:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `buffer_size` | 32KB | Data transfer buffer size |
+| `max_idle_conns` | 1000 | Total idle connections in pool |
+| `max_idle_conns_per_host` | 100 | Idle connections per host |
+| `max_conns_per_host` | 0 | Total connections per host (0 = unlimited) |
+| `idle_conn_timeout` | 90s | How long connections stay idle |
+| `tls_handshake_timeout` | 10s | TLS handshake timeout |
+| `expect_continue_timeout` | 1s | Wait for `100 Continue` before sending the body |
+| `response_header_timeout` | 30s | Max wait for upstream response headers |
+| `dial_timeout` | 10s | TCP connect timeout (HTTP and CONNECT) |
+| `dial_keep_alive` | 30s | TCP keep-alive interval |
+| `request_timeout` | 60s | Max wait for response headers incl. dialing (0 = off) |
+| `force_attempt_http2` | true | Enable HTTP/2 support |
+
+---
+
 
 ## Linux Service Deployment
 
@@ -101,7 +203,8 @@ sudo chown -R domain-forwarder:domain-forwarder /var/log/domain-forwarder
 #### 4. Configuration File Adjustment
 
 The configuration is overlaid on built-in defaults, so
-`/etc/domain-forwarder/config.yaml` only needs the values you want to change.
+`/etc/domain-forwarder/config.yaml` only needs the values you want to change
+(see [Configuration Reference](#configuration-reference)).
 A typical production config:
 
 ```yaml
@@ -272,6 +375,42 @@ Every forwarded request prints one summary line as `[METHOD] source=<ip:port>
 target=<url> req_size=<n> resp_status=<code> resp_size=<n> duration=<d>`;
 CONNECT tunnels print `sent=`/`recv=` byte counters. Set `debug: true` for
 additional detail lines.
+
+---
+
+## Testing Utilities
+
+### request-printer
+
+A utility service for testing and debugging proxy requests: it logs every
+incoming request in JSON and echoes a minimal response.
+
+```bash
+# Start with default settings (port 9090)
+make run-printer
+
+# Start with a config file / custom address
+./build/request-printer -c tools/request-printer/config.yaml
+./build/request-printer -addr :9999
+```
+
+Its configuration (`tools/request-printer/config.yaml`) sets `addr`,
+`max_body_read` and the `server` timeouts. Logged fields: timestamp, source
+IP/port, method, URL, protocol, all headers, body size, and a body preview
+(first/last 50 characters when the body exceeds 100 characters).
+
+Point the proxy at it to inspect what the proxy actually sends upstream:
+
+```bash
+curl -x http://localhost:8080 http://localhost:9090/test?foo=bar
+```
+
+### Integration Tests
+
+```bash
+# Start both services, send test requests, then stop them
+make test
+```
 
 ---
 
