@@ -70,7 +70,7 @@ echo "6. Creating systemd service..."
 cat > "$SERVICE_FILE" << 'EOF'
 [Unit]
 Description=Domain Forwarder HTTP/HTTPS Proxy Server
-Documentation=https://github.com/freyrlin/domain-forwarder
+Documentation=https://github.com/linfan/domain-forwarder
 After=network.target network-online.target
 Wants=network-online.target
 
