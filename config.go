@@ -147,8 +147,7 @@ type Config struct {
 }
 
 // defaultForwardConfig returns the built-in forward section defaults. The
-// values mirror pkg/forwarder.DefaultConfig and the sibling project
-// domain-dispatcher; keep all three in sync.
+// values mirror pkg/forwarder.DefaultConfig; keep the two in sync.
 func defaultForwardConfig() ForwardConfig {
 	return ForwardConfig{
 		BufferSize:            32 * 1024,

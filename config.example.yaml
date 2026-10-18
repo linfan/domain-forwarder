@@ -2,9 +2,6 @@
 #
 # Every value below is the built-in default, so an omitted key keeps its
 # default value and running without -c starts with all defaults.
-#
-# The forward section shares parameter names, defaults and semantics with the
-# sibling project domain-dispatcher.
 
 # Proxy listen address
 addr: ":8080"

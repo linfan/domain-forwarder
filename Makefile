@@ -21,7 +21,6 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 
 # Go build flags for optimization
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)
-GCFLAGS := -B
 
 all: build
 
@@ -55,11 +54,11 @@ build: forwarder request-printer
 
 forwarder:
 	@mkdir -p $(BUILD_DIR)
-	go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) .
+	go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) .
 
 request-printer:
 	@mkdir -p $(BUILD_DIR)
-	go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(BUILD_DIR)/$(PRINTER_NAME) ./tools/request-printer
+	go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PRINTER_NAME) ./tools/request-printer
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -99,40 +98,40 @@ install: build
 build-linux:
 	@echo "Building for Linux (amd64)..."
 	@mkdir -p $(DIST_DIR)/linux-amd64
-	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/linux-amd64/$(BINARY_NAME) .
-	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/linux-amd64/$(PRINTER_NAME) ./tools/request-printer
+	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/linux-amd64/$(BINARY_NAME) .
+	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/linux-amd64/$(PRINTER_NAME) ./tools/request-printer
 	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/linux-amd64/
 	@echo "Linux build complete: $(DIST_DIR)/linux-amd64/"
 
 build-linux-arm64:
 	@echo "Building for Linux (arm64)..."
 	@mkdir -p $(DIST_DIR)/linux-arm64
-	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/linux-arm64/$(BINARY_NAME) .
-	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/linux-arm64/$(PRINTER_NAME) ./tools/request-printer
+	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/linux-arm64/$(BINARY_NAME) .
+	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/linux-arm64/$(PRINTER_NAME) ./tools/request-printer
 	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/linux-arm64/
 	@echo "Linux ARM64 build complete: $(DIST_DIR)/linux-arm64/"
 
 build-macos:
 	@echo "Building for macOS (amd64)..."
 	@mkdir -p $(DIST_DIR)/darwin-amd64
-	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/darwin-amd64/$(BINARY_NAME) .
-	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/darwin-amd64/$(PRINTER_NAME) ./tools/request-printer
+	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/darwin-amd64/$(BINARY_NAME) .
+	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/darwin-amd64/$(PRINTER_NAME) ./tools/request-printer
 	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/darwin-amd64/
 	@echo "macOS (Intel) build complete: $(DIST_DIR)/darwin-amd64/"
 
 build-macos-arm64:
 	@echo "Building for macOS (Apple Silicon)..."
 	@mkdir -p $(DIST_DIR)/darwin-arm64
-	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/darwin-arm64/$(BINARY_NAME) .
-	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/darwin-arm64/$(PRINTER_NAME) ./tools/request-printer
+	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/darwin-arm64/$(BINARY_NAME) .
+	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/darwin-arm64/$(PRINTER_NAME) ./tools/request-printer
 	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/darwin-arm64/
 	@echo "macOS (Apple Silicon) build complete: $(DIST_DIR)/darwin-arm64/"
 
 build-windows:
 	@echo "Building for Windows (amd64)..."
 	@mkdir -p $(DIST_DIR)/windows-amd64
-	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/windows-amd64/$(BINARY_NAME).exe .
-	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -gcflags="$(GCFLAGS)" -o $(DIST_DIR)/windows-amd64/$(PRINTER_NAME).exe ./tools/request-printer
+	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/windows-amd64/$(BINARY_NAME).exe .
+	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/windows-amd64/$(PRINTER_NAME).exe ./tools/request-printer
 	@cp $(CONFIG_TEMPLATE) $(DIST_DIR)/windows-amd64/
 	@echo "Windows build complete: $(DIST_DIR)/windows-amd64/"
 

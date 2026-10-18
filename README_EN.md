@@ -4,10 +4,6 @@
 
 A high-performance HTTP/HTTPS forward proxy server written in Go.
 
-The forwarding engine and its configuration parameters are shared with the
-sibling project `domain-dispatcher`: identical parameter names, defaults and
-streaming/timeout behavior.
-
 > Build, configuration reference, performance tuning, deployment and
 > operations are covered in [DEPLOY.md](DEPLOY.md).
 
@@ -91,6 +87,8 @@ Field-by-field defaults, validation rules and tuning advice live in
   tokens listed in a `Connection` header. The client's `Accept-Encoding` is
   forwarded as-is (a forward proxy stays transparent)
 - **Body**: Forwarded as-is, preserving `Content-Length`
+- **Redirects**: Upstream 3xx responses are returned to the client as-is; the
+  proxy does not follow them
 - **Streaming**: `text/event-stream` responses are flushed chunk by chunk
 - **Tunnels**: CONNECT tunnels use `forward.dial_timeout` /
   `forward.dial_keep_alive` and reuse the engine's buffer pool
@@ -112,7 +110,7 @@ domain-forwarder/
 ├── config.go                    # Configuration types, defaults, loading, validation
 ├── pkg/
 │   ├── proxy/proxy.go           # Forward proxy handler (CONNECT tunnel + HTTP)
-│   └── forwarder/forwarder.go   # Shared forwarding engine (kept in sync with domain-dispatcher)
+│   └── forwarder/forwarder.go   # HTTP forwarding engine (pooling, timeouts, streaming relay)
 ├── tools/request-printer/       # Test/debug request logger
 ├── config.example.yaml          # Annotated config template (copy to config.yaml)
 ├── Makefile                     # Build automation

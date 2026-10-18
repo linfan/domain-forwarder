@@ -23,8 +23,7 @@ The full annotated reference — defaults, semantics and tuning notes for every
 setting — is `config.example.yaml`, bundled with every build and release
 archive. An omitted key keeps its built-in default, so running without `-c`
 starts with all defaults; precedence: command-line flags > config file >
-built-in defaults. The `forward` section shares parameter names, defaults and
-semantics with the sibling project domain-dispatcher.
+built-in defaults.
 
 Startup validation exits with code `1` and a precise message for: an
 ill-formed `addr` or out-of-range port, a non-positive `forward.buffer_size`

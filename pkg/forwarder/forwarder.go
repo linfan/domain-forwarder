@@ -1,6 +1,4 @@
-// Package forwarder implements the shared HTTP forwarding engine used by both
-// domain-forwarder and domain-dispatcher. Keep this file byte-identical in both
-// repositories.
+// Package forwarder implements the HTTP forwarding engine used by the proxy.
 package forwarder
 
 import (
@@ -50,8 +48,7 @@ type Config struct {
 	ForceAttemptHTTP2     bool
 }
 
-// DefaultConfig returns the canonical engine defaults. Both applications
-// prepopulate their YAML configuration with the same values.
+// DefaultConfig returns the canonical engine defaults.
 func DefaultConfig() Config {
 	return Config{
 		BufferSize:            32 * 1024,
@@ -151,6 +148,11 @@ func (f *Forwarder) getHTTPClient() *http.Client {
 		// context deadline in ForwardRequest instead.
 		f.httpClient = &http.Client{
 			Transport: transport,
+			// Relay redirects to the client instead of following them: a forward
+			// proxy must stay transparent.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		}
 	})
 	return f.httpClient

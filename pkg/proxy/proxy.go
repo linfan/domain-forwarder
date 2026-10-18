@@ -1,7 +1,5 @@
 // Package proxy implements the forward proxy handler: plain HTTP requests are
-// relayed through the shared forwarding engine, CONNECT requests get a raw TCP
-// tunnel. Keep the parameter semantics aligned with the sibling project
-// domain-dispatcher.
+// relayed through the forwarding engine, CONNECT requests get a raw TCP tunnel.
 package proxy
 
 import (

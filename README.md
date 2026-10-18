@@ -85,6 +85,7 @@ export https_proxy=http://localhost:8080
 - **请求头**：双向剥离逐跳头，包括 `Connection` 头中列出的字段。客户端的
   `Accept-Encoding` 原样转发（正向代理保持透明）
 - **请求体**：原样转发，并保留 `Content-Length`
+- **重定向**：上游 3xx 响应原样返回客户端，代理不自行跟随
 - **流式响应**：`text/event-stream` 响应逐块 flush
 - **隧道**：CONNECT 隧道使用 `forward.dial_timeout` / `forward.dial_keep_alive`，
   并复用引擎的缓冲区池
@@ -105,7 +106,7 @@ domain-forwarder/
 ├── config.go                    # 配置类型、默认值、加载与校验
 ├── pkg/
 │   ├── proxy/proxy.go           # 正向代理处理器（CONNECT 隧道 + HTTP 转发）
-│   └── forwarder/forwarder.go   # 共用转发引擎（与 domain-dispatcher 保持同步）
+│   └── forwarder/forwarder.go   # HTTP 转发引擎（连接池、超时、流式拷贝）
 ├── tools/request-printer/       # 调试用请求日志服务
 ├── config.example.yaml          # 带注释的配置模板（复制为 config.yaml）
 ├── Makefile                     # 构建自动化
