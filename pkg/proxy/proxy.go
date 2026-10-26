@@ -142,7 +142,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		buf := buffers.Get()
 		defer buffers.Put(buf)
-		c2t.bytes, c2t.err = io.CopyBuffer(targetConn, clientConn, buf)
+		c2t.bytes, c2t.err = io.CopyBuffer(writerOnly{targetConn}, readerOnly{clientConn}, buf)
 		c2t.end = time.Since(start)
 		if tcpConn, ok := targetConn.(*net.TCPConn); ok {
 			_ = tcpConn.CloseWrite()
@@ -153,7 +153,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		buf := buffers.Get()
 		defer buffers.Put(buf)
-		t2c.bytes, t2c.err = io.CopyBuffer(clientConn, targetConn, buf)
+		t2c.bytes, t2c.err = io.CopyBuffer(writerOnly{clientConn}, readerOnly{targetConn}, buf)
 		t2c.end = time.Since(start)
 		if tcpConn, ok := clientConn.(*net.TCPConn); ok {
 			_ = tcpConn.CloseWrite()
@@ -166,6 +166,12 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	s.logTunnel(r, clientConn, targetConn, c2t, t2c, time.Since(start))
 }
+
+// readerOnly and writerOnly hide ReaderFrom/WriterTo so io.CopyBuffer cannot
+// use splice(2), which fails with EIO on the biased page refcounts GVE uses.
+type readerOnly struct{ io.Reader }
+
+type writerOnly struct{ io.Writer }
 
 // copyResult is one direction of a CONNECT tunnel.
 type copyResult struct {
