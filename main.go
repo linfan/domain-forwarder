@@ -79,9 +79,7 @@ func main() {
 	}
 
 	log.Printf("Domain Forwarder %s (built %s)", Version, BuildTime)
-	if *configFile != "" {
-		log.Printf("Loaded configuration from %s", *configFile)
-	}
+	log.Printf("Loaded configuration from %s", *configFile)
 
 	// The shared forwarding engine. A forward proxy stays transparent, so the
 	// client's Accept-Encoding is kept (stripAcceptEncoding=false).

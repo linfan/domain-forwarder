@@ -6,7 +6,9 @@
 # Proxy listen address
 addr: ":8080"
 
-# Extra per-request detail logs; the one-line request summary is always printed
+# Extra diagnostics: startup configuration echo, tunnel local addresses, and
+# errors from requests the client aborted after the response had started.
+# The one-line request summary is always printed.
 debug: false
 
 # Add X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host to forwarded requests

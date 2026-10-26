@@ -123,12 +123,20 @@ sudo journalctl -u domain-forwarder -f         # follow in real time
 sudo journalctl -u domain-forwarder -n 100     # last 100 lines
 ```
 
-Every request prints exactly one summary line. CONNECT tunnels include
-`sent=`/`recv=` byte counters, the resolved `upstream=` address, and a
-per-direction outcome plus end time (`client2target=`/`target2client=`). A
-direction ending in `ok` reached a clean EOF; `reset`/`eio` mean the connection
-was torn down by a peer or intermediary; `closed`/`timeout` point to a local
-close or deadline. Set `debug: true` to also log the local socket addresses.
+Every request prints exactly one summary line. CONNECT tunnels include the
+`sent=`/`recv=` byte counters, the resolved `upstream=` address, and
+`duration=`. Aborted tunnels print `outcome=aborted` instead of a duration
+(that is the later direction's end time) and add `upstream_local=` — the proxy's
+source address and ephemeral port for the upstream connection, needed to match
+NAT/conntrack state — plus per-direction detail: `c2t=`/`t2c=` name the error and
+when that direction stopped (`ok` means a clean EOF of the other side;
+`reset`/`eio` mean the connection was torn down by a peer or intermediary;
+`closed`/`timeout` mean a local close or deadline). An error the kind cannot
+classify also prints its message as `c2t_err=`/`t2c_err=`. An HTTP request that
+fails before its response starts additionally logs the error; failures after
+that point — usually the client hanging up mid-body — are covered by the
+summary line alone. Set `debug: true` to also log those late failures and the
+client-side local address.
 
 ## Testing Utilities
 

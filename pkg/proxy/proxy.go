@@ -74,10 +74,17 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	result, err := s.engine.ForwardRequest(w, r, target, nil)
 	logSummary(r, target, result)
 	if err != nil {
-		log.Printf("Error forwarding request to %s: %v", target, err)
-		if !errors.Is(err, forwarder.ErrResponseStarted) {
-			http.Error(w, "Bad Gateway: upstream request failed", http.StatusBadGateway)
+		if errors.Is(err, forwarder.ErrResponseStarted) {
+			// The failure came after the response reached the client, usually
+			// because the client hung up mid-body. The summary line still records
+			// the request, so the detail is debug-only.
+			if s.config.Debug {
+				log.Printf("Error forwarding request to %s: %v", target, err)
+			}
+			return
 		}
+		log.Printf("Error forwarding request to %s: %v", target, err)
+		http.Error(w, "Bad Gateway: upstream request failed", http.StatusBadGateway)
 	}
 }
 
@@ -112,7 +119,11 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
-		log.Printf("Error sending connection established: %v", err)
+		// Only reachable when the client closes between CONNECT and the reply,
+		// which is routine client behavior rather than a proxy failure.
+		if s.config.Debug {
+			log.Printf("Error sending connection established to %s: %v", r.Host, err)
+		}
 		_ = clientConn.Close()
 		_ = targetConn.Close()
 		return
@@ -164,33 +175,49 @@ type copyResult struct {
 }
 
 // logTunnel emits exactly one line per CONNECT tunnel. upstream is the resolved
-// address, which makes front-end IP rotation visible; client2target and
-// target2client carry the outcome and end time of each direction so a half-close
-// can be told apart from a reset.
+// address, which makes front-end IP rotation visible. A clean tunnel only shows
+// counters and duration; aborted tunnels replace the duration (equal to the
+// later direction's end time) with per-direction detail. upstream_local on an
+// abort carries the ephemeral port needed to match NAT/conntrack state.
 func (s *Server) logTunnel(r *http.Request, clientConn, targetConn net.Conn, c2t, t2c copyResult, duration time.Duration) {
-	outcome := "ok"
-	switch {
-	case c2t.err != nil || t2c.err != nil:
-		outcome = "aborted"
-	case c2t.bytes == 0 && t2c.bytes == 0:
-		outcome = "empty"
-	}
+	line := fmt.Sprintf("[%s] source=%s target=%s upstream=%s sent=%d recv=%d",
+		r.Method, clientConn.RemoteAddr(), r.Host, targetConn.RemoteAddr(), c2t.bytes, t2c.bytes)
 
-	line := fmt.Sprintf("[%s] source=%s target=%s upstream=%s sent=%d recv=%d duration=%v outcome=%s client2target=%s@%v target2client=%s@%v",
-		r.Method, clientConn.RemoteAddr(), r.Host, targetConn.RemoteAddr(),
-		c2t.bytes, t2c.bytes, duration, outcome,
-		errKind(c2t.err), c2t.end.Round(time.Millisecond),
-		errKind(t2c.err), t2c.end.Round(time.Millisecond))
-	if c2t.err != nil {
-		line += fmt.Sprintf(" client2target_err=%q", c2t.err.Error())
+	aborted := c2t.err != nil || t2c.err != nil
+	if !aborted {
+		line += fmt.Sprintf(" duration=%v", duration.Round(time.Millisecond))
+	} else {
+		line += fmt.Sprintf(" outcome=aborted upstream_local=%s c2t=%s@%v t2c=%s@%v",
+			targetConn.LocalAddr(),
+			errKind(c2t.err), c2t.end.Round(time.Millisecond),
+			errKind(t2c.err), t2c.end.Round(time.Millisecond))
 	}
-	if t2c.err != nil {
-		line += fmt.Sprintf(" target2client_err=%q", t2c.err.Error())
+	if detail := errDetail(c2t.err); detail != "" {
+		line += fmt.Sprintf(" c2t_err=%q", detail)
+	}
+	if detail := errDetail(t2c.err); detail != "" {
+		line += fmt.Sprintf(" t2c_err=%q", detail)
 	}
 	if s.config.Debug {
-		line += fmt.Sprintf(" client_local=%s upstream_local=%s", clientConn.LocalAddr(), targetConn.LocalAddr())
+		line += fmt.Sprintf(" client_local=%s", clientConn.LocalAddr())
+		if !aborted {
+			line += fmt.Sprintf(" upstream_local=%s", targetConn.LocalAddr())
+		}
 	}
 	log.Print(line)
+}
+
+// errDetail only surfaces errors errKind cannot classify; a known errno is
+// already named by the kind, so repeating its message adds no information.
+func errDetail(err error) string {
+	if err == nil || errKind(err) != "error" {
+		return ""
+	}
+	var sysErr *os.SyscallError
+	if errors.As(err, &sysErr) {
+		return sysErr.Syscall + ": " + sysErr.Err.Error()
+	}
+	return err.Error()
 }
 
 // errKind classifies a copy error. splice(2) reports a socket that was reset or
