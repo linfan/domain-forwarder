@@ -4,11 +4,14 @@ package proxy
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	"domain-forwarder/pkg/forwarder"
@@ -115,19 +118,21 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bidirectional copy reusing the engine's buffer pool
+	// Bidirectional copy reusing the engine's buffer pool. Per-direction end
+	// times are recorded so the log shows which side stopped first: a nil error
+	// means EOF (the peer half-closed), an error means the copy was aborted.
 	buffers := s.engine.Buffers()
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	var clientToTarget, targetToClient int64
-	var clientToTargetErr, targetToClientErr error
+	var c2t, t2c copyResult
 
 	go func() {
 		defer wg.Done()
 		buf := buffers.Get()
 		defer buffers.Put(buf)
-		clientToTarget, clientToTargetErr = io.CopyBuffer(targetConn, clientConn, buf)
+		c2t.bytes, c2t.err = io.CopyBuffer(targetConn, clientConn, buf)
+		c2t.end = time.Since(start)
 		if tcpConn, ok := targetConn.(*net.TCPConn); ok {
 			_ = tcpConn.CloseWrite()
 		}
@@ -137,7 +142,8 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		buf := buffers.Get()
 		defer buffers.Put(buf)
-		targetToClient, targetToClientErr = io.CopyBuffer(clientConn, targetConn, buf)
+		t2c.bytes, t2c.err = io.CopyBuffer(clientConn, targetConn, buf)
+		t2c.end = time.Since(start)
 		if tcpConn, ok := clientConn.(*net.TCPConn); ok {
 			_ = tcpConn.CloseWrite()
 		}
@@ -147,17 +153,72 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	_ = clientConn.Close()
 	_ = targetConn.Close()
 
+	s.logTunnel(r, clientConn, targetConn, c2t, t2c, time.Since(start))
+}
+
+// copyResult is one direction of a CONNECT tunnel.
+type copyResult struct {
+	bytes int64
+	err   error
+	end   time.Duration // elapsed time from tunnel start until this copy returned
+}
+
+// logTunnel emits exactly one line per CONNECT tunnel. upstream is the resolved
+// address, which makes front-end IP rotation visible; client2target and
+// target2client carry the outcome and end time of each direction so a half-close
+// can be told apart from a reset.
+func (s *Server) logTunnel(r *http.Request, clientConn, targetConn net.Conn, c2t, t2c copyResult, duration time.Duration) {
+	outcome := "ok"
 	switch {
-	case clientToTargetErr != nil || targetToClientErr != nil:
-		log.Printf("[%s] source=%s target=%s tunnel aborted: client->target: %v, target->client: %v (sent=%d recv=%d duration=%v)",
-			r.Method, r.RemoteAddr, r.Host, clientToTargetErr, targetToClientErr, clientToTarget, targetToClient, time.Since(start))
-	case clientToTarget == 0 && targetToClient == 0:
-		log.Printf("[%s] source=%s target=%s tunnel closed with no data exchanged (duration=%v)",
-			r.Method, r.RemoteAddr, r.Host, time.Since(start))
+	case c2t.err != nil || t2c.err != nil:
+		outcome = "aborted"
+	case c2t.bytes == 0 && t2c.bytes == 0:
+		outcome = "empty"
 	}
 
-	log.Printf("[%s] source=%s target=%s sent=%d recv=%d duration=%v",
-		r.Method, r.RemoteAddr, r.Host, clientToTarget, targetToClient, time.Since(start))
+	line := fmt.Sprintf("[%s] source=%s target=%s upstream=%s sent=%d recv=%d duration=%v outcome=%s client2target=%s@%v target2client=%s@%v",
+		r.Method, clientConn.RemoteAddr(), r.Host, targetConn.RemoteAddr(),
+		c2t.bytes, t2c.bytes, duration, outcome,
+		errKind(c2t.err), c2t.end.Round(time.Millisecond),
+		errKind(t2c.err), t2c.end.Round(time.Millisecond))
+	if c2t.err != nil {
+		line += fmt.Sprintf(" client2target_err=%q", c2t.err.Error())
+	}
+	if t2c.err != nil {
+		line += fmt.Sprintf(" target2client_err=%q", t2c.err.Error())
+	}
+	if s.config.Debug {
+		line += fmt.Sprintf(" client_local=%s upstream_local=%s", clientConn.LocalAddr(), targetConn.LocalAddr())
+	}
+	log.Print(line)
+}
+
+// errKind classifies a copy error. splice(2) reports a socket that was reset or
+// otherwise torn down as EIO instead of ECONNRESET, so eio and reset both point
+// to an abrupt abort rather than a normal close.
+func errKind(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, io.EOF):
+		return "eof"
+	case errors.Is(err, net.ErrClosed):
+		return "closed"
+	case errors.Is(err, syscall.ECONNRESET):
+		return "reset"
+	case errors.Is(err, syscall.ECONNABORTED):
+		return "conn_aborted"
+	case errors.Is(err, syscall.EPIPE):
+		return "broken_pipe"
+	case errors.Is(err, syscall.ETIMEDOUT):
+		return "timeout"
+	case errors.Is(err, os.ErrDeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, syscall.EIO):
+		return "eio"
+	default:
+		return "error"
+	}
 }
 
 // logSummary prints the unified per-request summary line.

@@ -123,8 +123,12 @@ sudo journalctl -u domain-forwarder -f         # follow in real time
 sudo journalctl -u domain-forwarder -n 100     # last 100 lines
 ```
 
-Every request prints one summary line; CONNECT tunnels additionally print
-`sent=`/`recv=` byte counters. Set `debug: true` for additional detail.
+Every request prints exactly one summary line. CONNECT tunnels include
+`sent=`/`recv=` byte counters, the resolved `upstream=` address, and a
+per-direction outcome plus end time (`client2target=`/`target2client=`). A
+direction ending in `ok` reached a clean EOF; `reset`/`eio` mean the connection
+was torn down by a peer or intermediary; `closed`/`timeout` point to a local
+close or deadline. Set `debug: true` to also log the local socket addresses.
 
 ## Testing Utilities
 
