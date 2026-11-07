@@ -62,14 +62,16 @@ log:
   max_size: 100                  # Max size (MB) of one log file before rotation
   max_backups: 10                # Max number of rotated files to keep
 
-# Serve proxy clients over TLS (an HTTPS proxy). Browsers such as Chrome treat
-# proxy certificate errors as fatal, so use a publicly trusted certificate
-# whose SAN matches the host name clients put in the proxy settings; a Let's
-# Encrypt fullchain.pem works as-is. Validation fails at startup when the
-# configured certificate files are missing or cannot be loaded.
+# Serve proxy clients over TLS (an HTTPS proxy). Any PEM certificate/key pair
+# works; prefer a full chain (e.g. Let's Encrypt fullchain.pem) so clients
+# receive the intermediate certificates. Browsers such as Chrome treat proxy
+# certificate errors as fatal, so the certificate must be publicly trusted and
+# its SAN must match the host name clients put in the proxy settings.
+# Validation fails at startup when the pair is missing, unreadable or mismatched.
 tls:
   enabled: false
-  cert_file: /path/to/fullchain.pem
-  key_file: /path/to/privkey.pem
+  cert_file: /path/to/server.crt
+  key_file: /path/to/server.key
+  # Let's Encrypt:
   # cert_file: /etc/letsencrypt/live/proxy.example.com/fullchain.pem
   # key_file: /etc/letsencrypt/live/proxy.example.com/privkey.pem

@@ -11,6 +11,8 @@
 - **HTTP 与 HTTPS**：支持明文 HTTP 转发，并通过 CONNECT 方法建立 HTTPS 隧道
 - **HTTPS 代理监听**：代理端口可启用 TLS 并使用 Let's Encrypt 的
   `fullchain.pem`，Chrome 等浏览器可直接以 `https://` 代理方式使用
+- **HTTP/2 CONNECT**：同时支持 HTTP/1.1 与 HTTP/2 的 CONNECT 隧道，Chrome
+  会在单条 TLS 连接上多路复用所有隧道
 - **高并发**：连接池容量可配置
 - **缓冲区复用**：基于 `sync.Pool` 实现省内存的数据搬运
 - **逐跳头处理**：按 RFC 7230 剥离逐跳头（hop-by-hop header），包括 `Connection`
@@ -92,8 +94,9 @@ export https_proxy=http://localhost:8080
 - **请求体**：原样转发，并保留 `Content-Length`
 - **重定向**：上游 3xx 响应原样返回客户端，代理不自行跟随
 - **流式响应**：`text/event-stream` 响应逐块 flush
-- **隧道**：CONNECT 隧道使用 `forward.dial_timeout` / `forward.dial_keep_alive`，
-  并复用引擎的缓冲区池
+- **隧道**：HTTP/1.1 CONNECT 劫持为原始 TCP 隧道，HTTP/2 CONNECT 在流内转发；
+  两者都使用 `forward.dial_timeout` / `forward.dial_keep_alive`，并复用引擎的
+  缓冲区池
 - **失败处理**：响应开始前转发失败返回 502 Bad Gateway；响应已经开始后的失败
   仅记录日志
 

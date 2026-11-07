@@ -35,10 +35,12 @@ after a graceful SIGINT/SIGTERM shutdown.
 ## HTTPS Proxy with Let's Encrypt
 
 The proxy listener can serve TLS directly, so browsers can use it as an
-`https://` proxy. Browsers reject proxy TLS errors without an interstitial, so a
-publicly trusted certificate is required; a Let's Encrypt certificate works.
-Point `tls.cert_file` at `fullchain.pem` — the intermediate chain must be
-included, `cert.pem` alone is not enough — and `tls.key_file` at `privkey.pem`:
+`https://` proxy. Any PEM certificate/key pair works (`server.crt` +
+`server.key`); a full chain is recommended so clients receive the
+intermediates. Browsers reject proxy TLS errors without an interstitial, so
+Chrome needs a publicly trusted certificate; with Let's Encrypt, point
+`tls.cert_file` at `fullchain.pem` (the intermediate chain must be included,
+`cert.pem` alone is not enough) and `tls.key_file` at `privkey.pem`:
 
 ```yaml
 addr: ":8888"
@@ -82,9 +84,10 @@ and restart the service after every renewal yourself.
 - Configure the proxy as `https://proxy.example.com:8888`. The host name must
   match a SAN of the certificate; an IP address will not match a Let's Encrypt
   certificate.
-- The listener negotiates HTTP/1.1 only. Chrome offers HTTP/2 to an HTTPS proxy
-  via ALPN, and Go's HTTP/2 connections cannot be hijacked for the CONNECT
-  tunnel, so HTTP/2 would make every CONNECT request fail.
+- The listener offers `h2` and `http/1.1` via ALPN. Chrome negotiates HTTP/2 and
+  multiplexes its CONNECT tunnels over a single TLS connection; curl uses
+  HTTP/1.1 unless `--proxy-http2` is given, which is a convenient way to test
+  both tunnel paths.
 - Verify from the command line with
   `curl -x https://proxy.example.com:8888 https://example.com`; self-signed
   certificates additionally need `--proxy-cacert`.
@@ -181,8 +184,9 @@ sudo journalctl -u domain-forwarder -n 100     # last 100 lines
 ```
 
 Every request prints exactly one summary line. CONNECT tunnels include the
-`sent=`/`recv=` byte counters, the resolved `upstream=` address, and
-`duration=`. Aborted tunnels print `outcome=aborted` instead of a duration
+proxy-side protocol (`proto=h1` or `proto=h2`), the `sent=`/`recv=` byte
+counters, the resolved `upstream=` address, and `duration=`. Aborted tunnels
+print `outcome=aborted` instead of a duration
 (that is the later direction's end time) and add `upstream_local=` — the proxy's
 source address and ephemeral port for the upstream connection, needed to match
 NAT/conntrack state — plus per-direction detail: `c2t=`/`t2c=` name the error and

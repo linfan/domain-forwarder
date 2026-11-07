@@ -11,6 +11,7 @@ A high-performance HTTP/HTTPS forward proxy server written in Go.
 
 - **HTTP & HTTPS**: Plain HTTP forwarding plus HTTPS tunneling via the CONNECT method
 - **HTTPS proxy listener**: Serve TLS on the proxy port using a Let's Encrypt `fullchain.pem`, so Chrome can use it as an `https://` proxy
+- **HTTP/2 CONNECT**: Tunnels work over both HTTP/1.1 and HTTP/2; Chrome multiplexes all its tunnels over one TLS connection
 - **High concurrency**: Connection pooling with configurable pool sizes
 - **Buffer pooling**: Memory-efficient data transfer using `sync.Pool`
 - **Hop-by-hop header handling**: RFC 7230-compliant header stripping, including `Connection`-listed tokens
@@ -94,8 +95,10 @@ Field-by-field defaults, validation rules and tuning advice live in
 - **Redirects**: Upstream 3xx responses are returned to the client as-is; the
   proxy does not follow them
 - **Streaming**: `text/event-stream` responses are flushed chunk by chunk
-- **Tunnels**: CONNECT tunnels use `forward.dial_timeout` /
-  `forward.dial_keep_alive` and reuse the engine's buffer pool
+- **Tunnels**: HTTP/1.1 CONNECT is hijacked into a raw TCP tunnel, while
+  HTTP/2 CONNECT relays data inside the stream; both use
+  `forward.dial_timeout` / `forward.dial_keep_alive` and reuse the engine's
+  buffer pool
 - **Failures**: A forwarding failure before the response starts returns 502 Bad
   Gateway; failures after the response has started are only logged
 
