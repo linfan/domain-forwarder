@@ -9,6 +9,8 @@
 ## 功能特性
 
 - **HTTP 与 HTTPS**：支持明文 HTTP 转发，并通过 CONNECT 方法建立 HTTPS 隧道
+- **HTTPS 代理监听**：代理端口可启用 TLS 并使用 Let's Encrypt 的
+  `fullchain.pem`，Chrome 等浏览器可直接以 `https://` 代理方式使用
 - **高并发**：连接池容量可配置
 - **缓冲区复用**：基于 `sync.Pool` 实现省内存的数据搬运
 - **逐跳头处理**：按 RFC 7230 剥离逐跳头（hop-by-hop header），包括 `Connection`
@@ -48,6 +50,9 @@ curl -x http://localhost:8080 http://example.com
 # 通过代理发起 HTTPS 请求
 curl -x http://localhost:8080 https://example.com
 
+# 若 tls.enabled 已开启，代理本身也要用 https:// 访问
+curl -x https://proxy.example.com:8080 https://example.com
+
 # 设置为环境变量
 export http_proxy=http://localhost:8080
 export https_proxy=http://localhost:8080
@@ -75,7 +80,7 @@ export https_proxy=http://localhost:8080
   `buffer_size`）
 - `server`：代理监听地址对应的 HTTP 服务器参数
 - `log`：可选的文件日志与按大小滚动（未配置时输出到 stderr）
-- `tls`：为代理自身的监听端口启用 TLS
+- `tls`：为代理自身的监听端口启用 TLS（支持 Let's Encrypt 的 `fullchain.pem`）
 
 各字段的默认值、校验规则与调优建议见 [DEPLOY.md](DEPLOY.md)。
 

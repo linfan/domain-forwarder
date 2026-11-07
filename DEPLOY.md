@@ -28,9 +28,66 @@ built-in defaults.
 Startup validation exits with code `1` and a precise message for: an
 ill-formed `addr` or out-of-range port, a non-positive `forward.buffer_size`
 or `server.max_header_bytes`, a negative duration or pool size, an invalid
-blacklist entry (neither an IP nor a CIDR range), or missing certificate/key
-files when `tls.enabled` is true. `0` is returned after a graceful
-SIGINT/SIGTERM shutdown.
+blacklist entry (neither an IP nor a CIDR range), or missing, unreadable or
+mismatched certificate/key files when `tls.enabled` is true. `0` is returned
+after a graceful SIGINT/SIGTERM shutdown.
+
+## HTTPS Proxy with Let's Encrypt
+
+The proxy listener can serve TLS directly, so browsers can use it as an
+`https://` proxy. Browsers reject proxy TLS errors without an interstitial, so a
+publicly trusted certificate is required; a Let's Encrypt certificate works.
+Point `tls.cert_file` at `fullchain.pem` — the intermediate chain must be
+included, `cert.pem` alone is not enough — and `tls.key_file` at `privkey.pem`:
+
+```yaml
+addr: ":8888"
+tls:
+  enabled: true
+  cert_file: /etc/letsencrypt/live/proxy.example.com/fullchain.pem
+  key_file: /etc/letsencrypt/live/proxy.example.com/privkey.pem
+```
+
+### Permissions and renewal
+
+Certbot keeps `privkey.pem` readable by root only, and `/etc/letsencrypt/archive`
+is not traversable by other users. The service runs as `domain-forwarder`, so
+copy the certificate somewhere the service can read, and let a certbot deploy
+hook refresh the copy and restart the service on every renewal (the proxy has
+no hot reload):
+
+```bash
+sudo install -d -m 750 -o domain-forwarder -g domain-forwarder /etc/domain-forwarder/tls
+sudo tee /etc/letsencrypt/renewal-hooks/deploy/domain-forwarder.sh >/dev/null <<'EOF'
+#!/bin/sh
+set -e
+install -m 640 -o domain-forwarder -g domain-forwarder \
+  /etc/letsencrypt/live/proxy.example.com/fullchain.pem /etc/domain-forwarder/tls/fullchain.pem
+install -m 600 -o domain-forwarder -g domain-forwarder \
+  /etc/letsencrypt/live/proxy.example.com/privkey.pem /etc/domain-forwarder/tls/privkey.pem
+systemctl try-restart domain-forwarder
+EOF
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/domain-forwarder.sh
+sudo /etc/letsencrypt/renewal-hooks/deploy/domain-forwarder.sh
+```
+
+Then set `cert_file: /etc/domain-forwarder/tls/fullchain.pem` and
+`key_file: /etc/domain-forwarder/tls/privkey.pem` in the configuration. To use
+the certbot directories directly instead, grant the service user access to
+them (`setfacl -R -m u:domain-forwarder:rx /etc/letsencrypt/archive /etc/letsencrypt/live`)
+and restart the service after every renewal yourself.
+
+### Client settings
+
+- Configure the proxy as `https://proxy.example.com:8888`. The host name must
+  match a SAN of the certificate; an IP address will not match a Let's Encrypt
+  certificate.
+- The listener negotiates HTTP/1.1 only. Chrome offers HTTP/2 to an HTTPS proxy
+  via ALPN, and Go's HTTP/2 connections cannot be hijacked for the CONNECT
+  tunnel, so HTTP/2 would make every CONNECT request fail.
+- Verify from the command line with
+  `curl -x https://proxy.example.com:8888 https://example.com`; self-signed
+  certificates additionally need `--proxy-cacert`.
 
 ## Manual Deployment
 

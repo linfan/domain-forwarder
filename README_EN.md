@@ -10,6 +10,7 @@ A high-performance HTTP/HTTPS forward proxy server written in Go.
 ## Features
 
 - **HTTP & HTTPS**: Plain HTTP forwarding plus HTTPS tunneling via the CONNECT method
+- **HTTPS proxy listener**: Serve TLS on the proxy port using a Let's Encrypt `fullchain.pem`, so Chrome can use it as an `https://` proxy
 - **High concurrency**: Connection pooling with configurable pool sizes
 - **Buffer pooling**: Memory-efficient data transfer using `sync.Pool`
 - **Hop-by-hop header handling**: RFC 7230-compliant header stripping, including `Connection`-listed tokens
@@ -47,6 +48,9 @@ curl -x http://localhost:8080 http://example.com
 # HTTPS request via proxy
 curl -x http://localhost:8080 https://example.com
 
+# If tls.enabled is on, the proxy itself is reached over https://
+curl -x https://proxy.example.com:8080 https://example.com
+
 # Set as environment variable
 export http_proxy=http://localhost:8080
 export https_proxy=http://localhost:8080
@@ -75,7 +79,7 @@ The config is grouped into these sections:
   `buffer_size`)
 - `server`: HTTP server settings for the proxy listener
 - `log`: optional file logging with size-based rotation (stderr when unset)
-- `tls`: TLS for the proxy's own listener
+- `tls`: TLS for the proxy's own listener (Let's Encrypt `fullchain.pem` supported)
 
 Field-by-field defaults, validation rules and tuning advice live in
 [DEPLOY.md](DEPLOY.md).

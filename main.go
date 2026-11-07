@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -103,6 +104,11 @@ func main() {
 		IdleTimeout:       cfg.Server.IdleTimeout,
 		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
 		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
+		// CONNECT is implemented by hijacking the connection, which Go's
+		// HTTP/2 server does not support. Chrome offers h2 to an HTTPS proxy
+		// via ALPN, so keep the proxy listener on HTTP/1.1: a non-nil
+		// TLSNextProto without an "h2" entry disables automatic HTTP/2.
+		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 	}
 
 	// Register the signal handler before starting the listener so a signal

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
@@ -230,11 +231,8 @@ func (cfg *Config) Validate() error {
 		if cfg.TLS.KeyFile == "" {
 			return fmt.Errorf("tls.key_file is required when tls is enabled")
 		}
-		if _, err := os.Stat(cfg.TLS.CertFile); os.IsNotExist(err) {
-			return fmt.Errorf("tls cert file not found: %s", cfg.TLS.CertFile)
-		}
-		if _, err := os.Stat(cfg.TLS.KeyFile); os.IsNotExist(err) {
-			return fmt.Errorf("tls key file not found: %s", cfg.TLS.KeyFile)
+		if _, err := tls.LoadX509KeyPair(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil {
+			return fmt.Errorf("tls certificate/key pair: %w", err)
 		}
 	}
 
