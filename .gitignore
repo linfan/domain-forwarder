@@ -32,6 +32,7 @@ vendor/
 # Environment files
 .env
 .env.local
+note/
 
 # Log files
 *.log
