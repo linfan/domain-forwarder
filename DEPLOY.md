@@ -28,9 +28,11 @@ built-in defaults.
 Startup validation exits with code `1` and a precise message for: an
 ill-formed `addr` or out-of-range port, a non-positive `forward.buffer_size`
 or `server.max_header_bytes`, a negative duration or pool size, an invalid
-blacklist entry (neither an IP nor a CIDR range), or missing, unreadable or
-mismatched certificate/key files when `tls.enabled` is true. `0` is returned
-after a graceful SIGINT/SIGTERM shutdown.
+blacklist entry (neither an IP nor a CIDR range), `auth` enabled without a
+username or password, a username containing `:`, a password starting with `$2`
+that is not a valid bcrypt hash, or missing, unreadable or mismatched
+certificate/key files when `tls.enabled` is true. `0` is returned after a
+graceful SIGINT/SIGTERM shutdown.
 
 ## HTTPS Proxy with Let's Encrypt
 
@@ -91,6 +93,42 @@ and restart the service after every renewal yourself.
 - Verify from the command line with
   `curl -x https://proxy.example.com:8888 https://example.com`; self-signed
   certificates additionally need `--proxy-cacert`.
+
+## Proxy Authentication
+
+Set `auth.enabled: true` with a single `auth.username` / `auth.password` pair to
+require HTTP Basic authentication. Requests without valid credentials get
+`407 Proxy Authentication Required` with a `Proxy-Authenticate: Basic`
+challenge, covering both plain HTTP forwarding and CONNECT tunnels.
+`Proxy-Authorization` is consumed by the proxy and never forwarded upstream.
+
+```yaml
+auth:
+  enabled: true
+  username: alice
+  password: s3cret
+```
+
+`password` may instead be a bcrypt hash beginning with `$2` (`$2a$`, `$2b$` and
+`$2y$` are accepted), keeping the plaintext out of the config file; a malformed
+hash fails startup validation. Generate one with any bcrypt tool:
+
+```bash
+htpasswd -nbB alice 's3cret' | cut -d: -f2
+```
+
+Clients can pass the credentials explicitly or embed them in the proxy URL:
+
+```bash
+curl -U alice:s3cret -x http://proxy.example.com:8888 https://example.com
+curl -x http://alice:s3cret@proxy.example.com:8888 https://example.com
+```
+
+Basic credentials are only base64-encoded, so anyone on the network path of a
+plain `http://` proxy listener can read them; pair authentication with
+`tls.enabled`. Browsers prompt for the credentials after the first 407 and
+reuse them for later requests and CONNECT tunnels. Configuration changes
+require a restart (there is no hot reload).
 
 ## Manual Deployment
 

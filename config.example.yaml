@@ -21,6 +21,21 @@ source_ip_blacklist: []
 #   - 203.0.113.7
 #   - 192.168.0.0/16
 
+# Require HTTP Basic authentication from proxy clients. Unauthenticated or
+# invalid requests get 407 Proxy Authentication Required with a
+# Proxy-Authenticate challenge; this covers HTTP forwarding and CONNECT tunnels.
+# password is either plaintext or a bcrypt hash starting with "$2"; a malformed
+# hash fails startup validation. Basic credentials are only base64-encoded, so
+# combine authentication with tls.enabled when the listener is on an untrusted
+# network.
+auth:
+  enabled: false
+  username: ""
+  password: ""
+  # username: alice
+  # password: s3cret
+  # password: $2y$10$...     # htpasswd -nbB alice 's3cret' | cut -d: -f2
+
 # -----------------------------------------------------------------------------
 # Forwarding engine: upstream connection pool, timeouts and streaming
 # (HTTP requests and CONNECT tunnels share the dial settings below)

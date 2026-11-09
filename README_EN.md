@@ -19,6 +19,8 @@ A high-performance HTTP/HTTPS forward proxy server written in Go.
 - **SSE-aware forwarding**: Streaming responses are flushed chunk by chunk and pass through uncompressed
 - **Timeouts**: Upstream dial/header/body-idle/body-duration and server read-header/idle timeouts are all configurable
 - **Source IP blacklist**: Reject individual IPs or CIDR ranges with 403
+- **Proxy authentication**: Require HTTP Basic authentication (single user,
+  plaintext or bcrypt-hashed password); unauthenticated requests get 407
 - **Graceful shutdown**: SIGINT/SIGTERM drains in-flight requests within `server.shutdown_timeout`
 - **Optional file logging**: Size-based rotation via the `log` section
 - **YAML configuration**: All values optional; built-in defaults apply when no config file is given
@@ -52,6 +54,10 @@ curl -x http://localhost:8080 https://example.com
 # If tls.enabled is on, the proxy itself is reached over https://
 curl -x https://proxy.example.com:8080 https://example.com
 
+# With proxy authentication (-U, or credentials in the proxy URL)
+curl -U user:pass -x http://localhost:8080 https://example.com
+curl -x http://user:pass@localhost:8080 https://example.com
+
 # Set as environment variable
 export http_proxy=http://localhost:8080
 export https_proxy=http://localhost:8080
@@ -73,7 +79,9 @@ command-line flags > config file > built-in defaults.
 
 The config is grouped into these sections:
 
-- Top level: `addr`, `debug`, `add_proxy_headers`, `source_ip_blacklist`
+- Top level: `addr`, `debug`, `add_proxy_headers`, `source_ip_blacklist`,
+  `auth` (HTTP Basic authentication for proxy clients; single user, password
+  plaintext or bcrypt hash)
 - `forward`: forwarding-engine parameters (pool sizes, dial/TLS/header
   timeouts, `request_timeout`, `stream_idle_timeout`, `response_body_timeout`,
   `streaming_flush`, `disable_compression`, `force_attempt_http2`,
@@ -90,7 +98,8 @@ Field-by-field defaults, validation rules and tuning advice live in
 - **Method**: Preserved for HTTP; `CONNECT` opens a raw TCP tunnel
 - **Headers**: Hop-by-hop headers are stripped in both directions, including the
   tokens listed in a `Connection` header. The client's `Accept-Encoding` is
-  forwarded as-is (a forward proxy stays transparent)
+  forwarded as-is (a forward proxy stays transparent); `Proxy-Authorization` is
+  consumed by the proxy and never forwarded upstream
 - **Body**: Forwarded as-is, preserving `Content-Length`
 - **Redirects**: Upstream 3xx responses are returned to the client as-is; the
   proxy does not follow them

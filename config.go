@@ -11,6 +11,7 @@ import (
 
 	"domain-forwarder/pkg/forwarder"
 
+	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,6 +20,14 @@ type TLSConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 	CertFile string `yaml:"cert_file"`
 	KeyFile  string `yaml:"key_file"`
+}
+
+// AuthConfig configures HTTP Basic authentication for proxy clients. Password
+// is either plaintext or a bcrypt hash starting with "$2".
+type AuthConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 // ForwardConfig represents the forwarding engine configuration. The plain
@@ -141,6 +150,7 @@ type Config struct {
 	Debug             bool          `yaml:"debug"`
 	AddProxyHeaders   bool          `yaml:"add_proxy_headers"`   // Add X-Forwarded-For/Proto/Host when forwarding
 	SourceIPBlacklist []string      `yaml:"source_ip_blacklist"` // Client IPs or CIDR ranges rejected with 403
+	Auth              AuthConfig    `yaml:"auth"`
 	Forward           ForwardConfig `yaml:"forward"`
 	Server            ServerConfig  `yaml:"server"`
 	Log               LogConfig     `yaml:"log"`
@@ -221,6 +231,23 @@ func (cfg *Config) Validate() error {
 	for _, entry := range cfg.SourceIPBlacklist {
 		if err := validateBlacklistEntry(entry); err != nil {
 			return fmt.Errorf("source_ip_blacklist: %w", err)
+		}
+	}
+
+	if cfg.Auth.Enabled {
+		if cfg.Auth.Username == "" {
+			return fmt.Errorf("auth.username is required when auth is enabled")
+		}
+		if strings.Contains(cfg.Auth.Username, ":") {
+			return fmt.Errorf("auth.username must not contain ':'")
+		}
+		if cfg.Auth.Password == "" {
+			return fmt.Errorf("auth.password is required when auth is enabled")
+		}
+		if strings.HasPrefix(cfg.Auth.Password, "$2") {
+			if _, err := bcrypt.Cost([]byte(cfg.Auth.Password)); err != nil {
+				return fmt.Errorf("auth.password is not a valid bcrypt hash: %w", err)
+			}
 		}
 	}
 

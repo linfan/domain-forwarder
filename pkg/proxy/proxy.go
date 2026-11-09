@@ -22,6 +22,7 @@ type Config struct {
 	Debug             bool
 	AddProxyHeaders   bool
 	SourceIPBlacklist []string
+	Auth              *Auth         // nil disables proxy authentication
 	DialTimeout       time.Duration // CONNECT tunnel dial timeout
 	DialKeepAlive     time.Duration // CONNECT tunnel TCP keep-alive interval
 }
@@ -30,11 +31,16 @@ type Config struct {
 type Server struct {
 	engine *forwarder.Forwarder
 	config Config
+	auth   *authenticator
 }
 
 // New creates a proxy handler on top of the forwarding engine.
 func New(engine *forwarder.Forwarder, config Config) *Server {
-	return &Server{engine: engine, config: config}
+	s := &Server{engine: engine, config: config}
+	if config.Auth != nil {
+		s.auth = newAuthenticator(config.Auth)
+	}
+	return s
 }
 
 // ServeHTTP dispatches CONNECT requests to the tunnel handler and everything
@@ -45,6 +51,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[BLOCKED] source=%s - IP is blacklisted", r.RemoteAddr)
 		}
 		http.Error(w, "Forbidden: request is not allowed", http.StatusForbidden)
+		return
+	}
+
+	if s.auth != nil && !s.auth.allow(r) {
+		if s.config.Debug {
+			log.Printf("[DENIED] source=%s method=%s target=%s - proxy authentication failed", r.RemoteAddr, r.Method, r.Host)
+		}
+		w.Header().Set("Proxy-Authenticate", `Basic realm="domain-forwarder", charset="UTF-8"`)
+		http.Error(w, "Proxy Authentication Required", http.StatusProxyAuthRequired)
 		return
 	}
 

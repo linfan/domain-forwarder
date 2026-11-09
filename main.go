@@ -85,10 +85,16 @@ func main() {
 	// client's Accept-Encoding is kept (stripAcceptEncoding=false).
 	engine := forwarder.New(cfg.Forward.EngineConfig(false))
 
+	var auth *proxy.Auth
+	if cfg.Auth.Enabled {
+		auth = &proxy.Auth{Username: cfg.Auth.Username, Password: cfg.Auth.Password}
+	}
+
 	handler := proxy.New(engine, proxy.Config{
 		Debug:             cfg.Debug,
 		AddProxyHeaders:   cfg.AddProxyHeaders,
 		SourceIPBlacklist: cfg.SourceIPBlacklist,
+		Auth:              auth,
 		DialTimeout:       cfg.Forward.DialTimeout,
 		DialKeepAlive:     cfg.Forward.DialKeepAlive,
 	})

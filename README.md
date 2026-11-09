@@ -22,6 +22,8 @@
 - **超时控制**：上游连接/响应头/响应体空闲/响应体总时长，以及服务端读请求头/空闲
   超时均可配置
 - **源 IP 黑名单**：可拒绝单个 IP 或 CIDR 网段，返回 403
+- **代理认证**：可要求客户端通过 HTTP Basic 认证（单用户，密码支持明文或 bcrypt
+  哈希），未认证请求返回 407
 - **优雅退出**：收到 SIGINT/SIGTERM 后在 `server.shutdown_timeout` 内处理完在途请求
 - **可选文件日志**：通过 `log` 段按大小滚动
 - **YAML 配置**：所有配置项均可省略，不提供配置文件时使用内置默认值
@@ -55,6 +57,10 @@ curl -x http://localhost:8080 https://example.com
 # 若 tls.enabled 已开启，代理本身也要用 https:// 访问
 curl -x https://proxy.example.com:8080 https://example.com
 
+# 代理启用认证时（-U，或把凭据写进代理 URL）
+curl -U user:pass -x http://localhost:8080 https://example.com
+curl -x http://user:pass@localhost:8080 https://example.com
+
 # 设置为环境变量
 export http_proxy=http://localhost:8080
 export https_proxy=http://localhost:8080
@@ -75,7 +81,8 @@ export https_proxy=http://localhost:8080
 
 配置分为以下几部分：
 
-- 顶层：`addr`、`debug`、`add_proxy_headers`、`source_ip_blacklist`
+- 顶层：`addr`、`debug`、`add_proxy_headers`、`source_ip_blacklist`、
+  `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）
 - `forward`：转发引擎参数（连接池容量、连接/TLS/响应头超时、
   `request_timeout`、`stream_idle_timeout`、`response_body_timeout`、
   `streaming_flush`、`disable_compression`、`force_attempt_http2`、
@@ -90,7 +97,8 @@ export https_proxy=http://localhost:8080
 
 - **方法**：HTTP 请求原样保留方法；`CONNECT` 建立原始 TCP 隧道
 - **请求头**：双向剥离逐跳头，包括 `Connection` 头中列出的字段。客户端的
-  `Accept-Encoding` 原样转发（正向代理保持透明）
+  `Accept-Encoding` 原样转发（正向代理保持透明）；`Proxy-Authorization` 仅由
+  代理消费，不会转发给上游
 - **请求体**：原样转发，并保留 `Content-Length`
 - **重定向**：上游 3xx 响应原样返回客户端，代理不自行跟随
 - **流式响应**：`text/event-stream` 响应逐块 flush
