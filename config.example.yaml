@@ -14,6 +14,17 @@ debug: false
 # Add X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host to forwarded requests
 add_proxy_headers: false
 
+# Edit requests before they are forwarded. Currently only adding headers is
+# supported. Applied to plain HTTP requests only: a CONNECT tunnel carries no
+# HTTP request to edit. Headers are set (a same-name header from the client or
+# from add_proxy_headers is overwritten) and validated at startup: names must
+# be RFC 7230 tokens, values must not contain CR, LF or NUL.
+edit:
+  enabled: false
+  add_headers:
+    # X-Proxy-Name: domain-forwarder
+    # X-Environment: prod
+
 # Reject requests whose source IP matches an entry below with 403.
 # Entries are individual IPs or CIDR ranges.
 source_ip_blacklist: []

@@ -90,9 +90,15 @@ func main() {
 		auth = &proxy.Auth{Username: cfg.Auth.Username, Password: cfg.Auth.Password}
 	}
 
+	var editHeaders map[string]string
+	if cfg.Edit.Enabled {
+		editHeaders = cfg.Edit.AddHeaders
+	}
+
 	handler := proxy.New(engine, proxy.Config{
 		Debug:             cfg.Debug,
 		AddProxyHeaders:   cfg.AddProxyHeaders,
+		EditHeaders:       editHeaders,
 		SourceIPBlacklist: cfg.SourceIPBlacklist,
 		Auth:              auth,
 		DialTimeout:       cfg.Forward.DialTimeout,

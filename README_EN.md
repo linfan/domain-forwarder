@@ -16,6 +16,8 @@ A high-performance HTTP/HTTPS forward proxy server written in Go.
 - **Buffer pooling**: Memory-efficient data transfer using `sync.Pool`
 - **Hop-by-hop header handling**: RFC 7230-compliant header stripping, including `Connection`-listed tokens
 - **X-Forwarded-For**: Optionally tracks the original client address (`add_proxy_headers`)
+- **Request editing**: Adds custom headers to forwarded requests (`edit`);
+  a same-name header is overwritten
 - **SSE-aware forwarding**: Streaming responses are flushed chunk by chunk and pass through uncompressed
 - **Timeouts**: Upstream dial/header/body-idle/body-duration and server read-header/idle timeouts are all configurable
 - **Source IP blacklist**: Reject individual IPs or CIDR ranges with 403
@@ -81,7 +83,7 @@ The config is grouped into these sections:
 
 - Top level: `addr`, `debug`, `add_proxy_headers`, `source_ip_blacklist`,
   `auth` (HTTP Basic authentication for proxy clients; single user, password
-  plaintext or bcrypt hash)
+  plaintext or bcrypt hash), `edit` (adds headers before forwarding)
 - `forward`: forwarding-engine parameters (pool sizes, dial/TLS/header
   timeouts, `request_timeout`, `stream_idle_timeout`, `response_body_timeout`,
   `streaming_flush`, `disable_compression`, `force_attempt_http2`,

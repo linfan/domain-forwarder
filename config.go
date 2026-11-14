@@ -30,6 +30,14 @@ type AuthConfig struct {
 	Password string `yaml:"password"`
 }
 
+// EditConfig configures request edits applied before forwarding. AddHeaders
+// sets (overwrites) headers on every forwarded plain-HTTP request; CONNECT
+// tunnels carry no HTTP request to edit.
+type EditConfig struct {
+	Enabled    bool              `yaml:"enabled"`
+	AddHeaders map[string]string `yaml:"add_headers"`
+}
+
 // ForwardConfig represents the forwarding engine configuration. The plain
 // values are prepopulated with defaults before the YAML file is overlaid, so
 // explicitly configured zeros stay zero; the two *bool fields are tri-state
@@ -151,6 +159,7 @@ type Config struct {
 	AddProxyHeaders   bool          `yaml:"add_proxy_headers"`   // Add X-Forwarded-For/Proto/Host when forwarding
 	SourceIPBlacklist []string      `yaml:"source_ip_blacklist"` // Client IPs or CIDR ranges rejected with 403
 	Auth              AuthConfig    `yaml:"auth"`
+	Edit              EditConfig    `yaml:"edit"`
 	Forward           ForwardConfig `yaml:"forward"`
 	Server            ServerConfig  `yaml:"server"`
 	Log               LogConfig     `yaml:"log"`
@@ -251,6 +260,17 @@ func (cfg *Config) Validate() error {
 		}
 	}
 
+	if cfg.Edit.Enabled {
+		for name, value := range cfg.Edit.AddHeaders {
+			if !validHeaderName(name) {
+				return fmt.Errorf("edit.add_headers: invalid header name %q", name)
+			}
+			if strings.ContainsAny(value, "\r\n\x00") {
+				return fmt.Errorf("edit.add_headers.%s: value must not contain CR, LF or NUL", name)
+			}
+		}
+	}
+
 	if cfg.TLS.Enabled {
 		if cfg.TLS.CertFile == "" {
 			return fmt.Errorf("tls.cert_file is required when tls is enabled")
@@ -277,6 +297,24 @@ func validateAddr(addr string) error {
 		return fmt.Errorf("invalid addr %q: port must be between 1 and 65535", addr)
 	}
 	return nil
+}
+
+// validHeaderName reports whether name is an RFC 7230 token, the character set
+// HTTP header field names are restricted to.
+func validHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // validateBlacklistEntry checks a single source_ip_blacklist entry, which may be

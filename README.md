@@ -18,6 +18,7 @@
 - **逐跳头处理**：按 RFC 7230 剥离逐跳头（hop-by-hop header），包括 `Connection`
   头中列出的字段
 - **X-Forwarded-For**：可选记录客户端原始地址（`add_proxy_headers`）
+- **请求编辑**：转发前为请求追加自定义 Header（`edit`），同名 Header 会被覆盖
 - **SSE 友好转发**：流式响应逐块 flush，并以不压缩的方式透传
 - **超时控制**：上游连接/响应头/响应体空闲/响应体总时长，以及服务端读请求头/空闲
   超时均可配置
@@ -82,7 +83,8 @@ export https_proxy=http://localhost:8080
 配置分为以下几部分：
 
 - 顶层：`addr`、`debug`、`add_proxy_headers`、`source_ip_blacklist`、
-  `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）
+  `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）、
+  `edit`（转发前为请求追加 Header）
 - `forward`：转发引擎参数（连接池容量、连接/TLS/响应头超时、
   `request_timeout`、`stream_idle_timeout`、`response_body_timeout`、
   `streaming_flush`、`disable_compression`、`force_attempt_http2`、
