@@ -25,6 +25,23 @@ edit:
     # X-Proxy-Name: domain-forwarder
     # X-Environment: prod
 
+# Mirror every plain-HTTP proxy request to a second HTTP service. Delivery is
+# asynchronous and best-effort: a slow, failing or overloaded mirror never
+# delays or fails the original request. CONNECT tunnels are not mirrored,
+# because their content is an opaque TLS stream.
+#
+# The mirrored copy keeps the method, headers (post-edit, hop-by-hop removed)
+# and body. Its URL is target + the original path/query, its Host is the mirror
+# host, and the original Host is sent in X-Forwarded-Host. Requests whose body
+# exceeds max_body_bytes, or whose body the upstream never fully reads, are not
+# mirrored. Memory use is bounded by queue_size * max_body_bytes.
+mirror:
+  enabled: false
+  target: ""                     # Absolute http(s) base URL, e.g. http://127.0.0.1:9000
+  timeout: 5s                    # Per-delivery timeout (connect + request + response)
+  max_body_bytes: 1048576        # Capture at most 1 MiB of the request body; 0 = bodies are never mirrored
+  queue_size: 256                # Pending mirror jobs; overflow is dropped silently
+
 # Reject requests whose source IP matches an entry below with 403.
 # Entries are individual IPs or CIDR ranges.
 source_ip_blacklist: []

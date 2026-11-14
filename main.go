@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -95,10 +96,27 @@ func main() {
 		editHeaders = cfg.Edit.AddHeaders
 	}
 
+	var mirror *proxy.Mirror
+	if cfg.Mirror.Enabled {
+		target, err := url.Parse(cfg.Mirror.Target)
+		if err != nil {
+			log.Fatalf("Invalid mirror.target: %v", err)
+		}
+		mirror = proxy.NewMirror(proxy.MirrorConfig{
+			Target:       target,
+			Timeout:      cfg.Mirror.Timeout,
+			MaxBodyBytes: cfg.Mirror.MaxBodyBytes,
+			QueueSize:    cfg.Mirror.QueueSize,
+			Debug:        cfg.Debug,
+		})
+		log.Printf("Mirroring HTTP requests to %s", cfg.Mirror.Target)
+	}
+
 	handler := proxy.New(engine, proxy.Config{
 		Debug:             cfg.Debug,
 		AddProxyHeaders:   cfg.AddProxyHeaders,
 		EditHeaders:       editHeaders,
+		Mirror:            mirror,
 		SourceIPBlacklist: cfg.SourceIPBlacklist,
 		Auth:              auth,
 		DialTimeout:       cfg.Forward.DialTimeout,

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -36,6 +37,17 @@ type AuthConfig struct {
 type EditConfig struct {
 	Enabled    bool              `yaml:"enabled"`
 	AddHeaders map[string]string `yaml:"add_headers"`
+}
+
+// MirrorConfig configures best-effort traffic mirroring: every plain-HTTP proxy
+// request is also delivered, asynchronously, to Target. Delivery failures and
+// queue overflow never affect the original request.
+type MirrorConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	Target       string        `yaml:"target"`         // Absolute http(s) base URL; original path and query are appended
+	Timeout      time.Duration `yaml:"timeout"`        // Per-delivery timeout
+	MaxBodyBytes int64         `yaml:"max_body_bytes"` // Max request body captured; larger bodies are not mirrored
+	QueueSize    int           `yaml:"queue_size"`     // Pending mirror jobs; overflow is dropped
 }
 
 // ForwardConfig represents the forwarding engine configuration. The plain
@@ -160,6 +172,7 @@ type Config struct {
 	SourceIPBlacklist []string      `yaml:"source_ip_blacklist"` // Client IPs or CIDR ranges rejected with 403
 	Auth              AuthConfig    `yaml:"auth"`
 	Edit              EditConfig    `yaml:"edit"`
+	Mirror            MirrorConfig  `yaml:"mirror"`
 	Forward           ForwardConfig `yaml:"forward"`
 	Server            ServerConfig  `yaml:"server"`
 	Log               LogConfig     `yaml:"log"`
@@ -198,6 +211,11 @@ func defaultConfig() *Config {
 			ShutdownTimeout:   30 * time.Second,
 		},
 		Log: LogConfig{MaxSize: 100, MaxBackups: 10},
+		Mirror: MirrorConfig{
+			Timeout:      5 * time.Second,
+			MaxBodyBytes: 1 << 20,
+			QueueSize:    256,
+		},
 	}
 }
 
@@ -271,6 +289,10 @@ func (cfg *Config) Validate() error {
 		}
 	}
 
+	if err := cfg.Mirror.Validate(); err != nil {
+		return err
+	}
+
 	if cfg.TLS.Enabled {
 		if cfg.TLS.CertFile == "" {
 			return fmt.Errorf("tls.cert_file is required when tls is enabled")
@@ -283,6 +305,39 @@ func (cfg *Config) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+// Validate checks the mirror section for semantic errors.
+func (mc *MirrorConfig) Validate() error {
+	if !mc.Enabled {
+		return nil
+	}
+	if mc.Target == "" {
+		return fmt.Errorf("mirror.target is required when mirror is enabled")
+	}
+	u, err := url.Parse(mc.Target)
+	if err != nil {
+		return fmt.Errorf("mirror.target: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("mirror.target %q must use http or https", mc.Target)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("mirror.target %q has no host", mc.Target)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("mirror.target %q must not contain a query or fragment", mc.Target)
+	}
+	if mc.Timeout <= 0 {
+		return fmt.Errorf("mirror.timeout must be positive, got %s", mc.Timeout)
+	}
+	if mc.MaxBodyBytes < 0 {
+		return fmt.Errorf("mirror.max_body_bytes must not be negative, got %d", mc.MaxBodyBytes)
+	}
+	if mc.QueueSize <= 0 {
+		return fmt.Errorf("mirror.queue_size must be positive, got %d", mc.QueueSize)
+	}
 	return nil
 }
 

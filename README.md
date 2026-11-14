@@ -19,6 +19,8 @@
   头中列出的字段
 - **X-Forwarded-For**：可选记录客户端原始地址（`add_proxy_headers`）
 - **请求编辑**：转发前为请求追加自定义 Header（`edit`），同名 Header 会被覆盖
+- **流量镜像**：可选把普通 HTTP 请求异步复制一份投递到另一个 HTTP 服务（`mirror`），
+  镜像失败静默处理，不影响原请求
 - **SSE 友好转发**：流式响应逐块 flush，并以不压缩的方式透传
 - **超时控制**：上游连接/响应头/响应体空闲/响应体总时长，以及服务端读请求头/空闲
   超时均可配置
@@ -84,7 +86,7 @@ export https_proxy=http://localhost:8080
 
 - 顶层：`addr`、`debug`、`add_proxy_headers`、`source_ip_blacklist`、
   `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）、
-  `edit`（转发前为请求追加 Header）
+  `edit`（转发前为请求追加 Header）、`mirror`（异步流量镜像）
 - `forward`：转发引擎参数（连接池容量、连接/TLS/响应头超时、
   `request_timeout`、`stream_idle_timeout`、`response_body_timeout`、
   `streaming_flush`、`disable_compression`、`force_attempt_http2`、
@@ -107,6 +109,8 @@ export https_proxy=http://localhost:8080
 - **隧道**：HTTP/1.1 CONNECT 劫持为原始 TCP 隧道，HTTP/2 CONNECT 在流内转发；
   两者都使用 `forward.dial_timeout` / `forward.dial_keep_alive`，并复用引擎的
   缓冲区池
+- **镜像**：`mirror` 开启时，普通 HTTP 请求在转发的同时异步投递一份到镜像目标；
+  CONNECT 不镜像，投递失败仅在 `debug` 模式下记录日志
 - **失败处理**：响应开始前转发失败返回 502 Bad Gateway；响应已经开始后的失败
   仅记录日志
 

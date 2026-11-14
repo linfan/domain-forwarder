@@ -22,6 +22,7 @@ type Config struct {
 	Debug             bool
 	AddProxyHeaders   bool
 	EditHeaders       map[string]string // Headers set on forwarded plain-HTTP requests; nil disables editing
+	Mirror            *Mirror           // Async shadow delivery; nil disables mirroring
 	SourceIPBlacklist []string
 	Auth              *Auth         // nil disables proxy authentication
 	DialTimeout       time.Duration // CONNECT tunnel dial timeout
@@ -86,6 +87,9 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		forwarder.AddForwardedHeaders(r, r.URL.Scheme)
 	}
 	applyRequestEdits(r, s.config.EditHeaders)
+	if s.config.Mirror != nil {
+		s.config.Mirror.prepare(r)
+	}
 
 	target := r.URL.String()
 	result, err := s.engine.ForwardRequest(w, r, target, nil)

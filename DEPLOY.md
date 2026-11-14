@@ -31,9 +31,11 @@ or `server.max_header_bytes`, a negative duration or pool size, an invalid
 blacklist entry (neither an IP nor a CIDR range), `auth` enabled without a
 username or password, a username containing `:`, a password starting with `$2`
 that is not a valid bcrypt hash, an `edit.add_headers` entry whose name is not
-an RFC 7230 token or whose value contains CR/LF/NUL, or missing, unreadable or
-mismatched certificate/key files when `tls.enabled` is true. `0` is returned
-after a graceful SIGINT/SIGTERM shutdown.
+an RFC 7230 token or whose value contains CR/LF/NUL, `mirror` enabled with a
+missing, non-http(s), host-less or query/fragment-bearing `mirror.target` or
+with non-positive `timeout`/`queue_size`, or missing, unreadable or mismatched
+certificate/key files when `tls.enabled` is true. `0` is returned after a
+graceful SIGINT/SIGTERM shutdown.
 
 ## HTTPS Proxy with Let's Encrypt
 
