@@ -116,9 +116,11 @@ export https_proxy=http://localhost:8080
 
 ## 内置工具
 
-`tools/request-printer` 是一个配套服务，把收到的每个请求以 JSON 格式记录到日志，
-便于查看代理实际转发到上游的内容（`make run-printer`）。它的配置说明以及
-`make test` 集成测试见 [DEPLOY.md](DEPLOY.md#testing-utilities)。
+`tools/request-printer` 是一个配套服务，把收到的每个请求以 JSON 格式记录到日志；
+配置 `output_dir`（或 `-output-dir` / `-o`）后，还会把每个请求另存为两个文件：
+`<微秒时间戳>.header`（请求行与 header 文本）和 `<微秒时间戳>.body`（原始 body，
+二进制），同名时追加 `-2`、`-3` 等序号。便于查看代理实际转发到上游的内容
+（`make run-printer`）。详细说明见 [DEPLOY.md](DEPLOY.md#testing-utilities)。
 
 ## 项目结构
 

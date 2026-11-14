@@ -252,7 +252,17 @@ curl -x http://localhost:8080 http://localhost:9090/test?foo=bar
 ```
 
 It takes its settings from `tools/request-printer/config.yaml` (`addr`,
-`max_body_read`, server timeouts) or the `-addr` flag. `make test` starts both
+`max_body_read`, `output_dir`, server timeouts) or the `-addr` / `-output-dir`
+(`-o`) flags. Set `output_dir` to also save every request on disk, one pair of
+files per request:
+
+```
+<timestamp>.header   # request line + headers, text
+<timestamp>.body     # raw body, binary (may still be text)
+```
+
+`<timestamp>` has microsecond precision (`20060102-150405.000000`); on a name
+collision `-2`, `-3`, ... is appended to both files. `make test` starts both
 services, sends test requests and stops them.
 
 ## Troubleshooting

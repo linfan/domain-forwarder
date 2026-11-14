@@ -4,6 +4,10 @@ addr: ":9090"
 # Maximum body size to read (bytes)
 max_body_read: 10485760  # 10MB
 
+# Directory to save each request as <timestamp>.header + <timestamp>.body.
+# Empty means log to stdout only. Created on startup if missing.
+output_dir: ""
+
 # HTTP server settings
 server:
   # Timeout for reading entire request

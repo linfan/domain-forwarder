@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,6 +28,7 @@ type Config = RequestPrinterConfig
 type RequestPrinterConfig struct {
 	Addr        string       `yaml:"addr"`
 	MaxBodyRead int64        `yaml:"max_body_read"`
+	OutputDir   string       `yaml:"output_dir"`
 	Server      ServerConfig `yaml:"server"`
 }
 
@@ -40,6 +45,7 @@ type ServerConfig struct {
 var (
 	configFile = flag.String("config", "", "Path to config file (YAML)")
 	listenAddr = flag.String("addr", "", "Listen address (overrides config)")
+	outputDir  = flag.String("output-dir", "", "Directory to save each request as .header/.body files (overrides config)")
 )
 
 // Version and BuildTime are injected at build time via -ldflags.
@@ -105,6 +111,7 @@ type RequestInfo struct {
 
 func main() {
 	flag.StringVar(configFile, "c", "", "Path to config file (YAML) (shorthand)")
+	flag.StringVar(outputDir, "o", "", "Directory to save requests (shorthand)")
 	flag.Parse()
 
 	// Load configuration
@@ -117,6 +124,15 @@ func main() {
 	if *listenAddr != "" {
 		cfg.Addr = *listenAddr
 	}
+	if *outputDir != "" {
+		cfg.OutputDir = *outputDir
+	}
+
+	if cfg.OutputDir != "" {
+		if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
+			log.Fatalf("Failed to create output directory %s: %v", cfg.OutputDir, err)
+		}
+	}
 
 	// Set global config for handler
 	globalConfig = cfg
@@ -127,6 +143,9 @@ func main() {
 	}
 	log.Printf("Request Printer %s (built %s)", Version, BuildTime)
 	log.Printf("Starting request-printer service on %s", cfg.Addr)
+	if cfg.OutputDir != "" {
+		log.Printf("Saving requests to %s", cfg.OutputDir)
+	}
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
@@ -156,7 +175,8 @@ func main() {
 }
 
 func handleRequest(w http.ResponseWriter, r *http.Request) {
-	timestamp := time.Now().Format(time.RFC3339Nano)
+	receivedAt := time.Now()
+	timestamp := receivedAt.Format(time.RFC3339Nano)
 
 	// Extract source IP and port
 	sourceIP, sourcePort, err := net.SplitHostPort(r.RemoteAddr)
@@ -186,6 +206,17 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		limitReader := io.LimitReader(r.Body, globalConfig.MaxBodyRead)
 		bodyBytes, _ = io.ReadAll(limitReader)
 		r.Body.Close()
+	}
+
+	// Save the raw request to files when an output directory is configured
+	if globalConfig.OutputDir != "" {
+		baseName := receivedAt.Format("20060102-150405.000000")
+		saved, err := saveRequestFiles(globalConfig.OutputDir, baseName, formatRequestHeaders(r), bodyBytes)
+		if err != nil {
+			log.Printf("Failed to save request files: %v", err)
+		} else {
+			log.Printf("Saved request to %s.{header,body}", filepath.Join(globalConfig.OutputDir, saved))
+		}
 	}
 
 	bodySize := int64(len(bodyBytes))
@@ -222,6 +253,64 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write(jsonData)
+}
+
+// saveMu serializes file name allocation so concurrent requests cannot pick
+// the same base name.
+var saveMu sync.Mutex
+
+// saveRequestFiles writes the request headers and body to dir, using baseName
+// (or baseName-2, baseName-3, ... on collision) as the file stem. It returns
+// the stem actually used.
+func saveRequestFiles(dir, baseName, headers string, body []byte) (string, error) {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	for i := 1; ; i++ {
+		name := baseName
+		if i > 1 {
+			name = fmt.Sprintf("%s-%d", baseName, i)
+		}
+
+		headerPath := filepath.Join(dir, name+".header")
+		bodyPath := filepath.Join(dir, name+".body")
+		if fileExists(headerPath) || fileExists(bodyPath) {
+			continue
+		}
+
+		if err := os.WriteFile(headerPath, []byte(headers), 0o644); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(bodyPath, body, 0o644); err != nil {
+			return "", err
+		}
+		return name, nil
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// formatRequestHeaders renders the received request line and headers as text.
+func formatRequestHeaders(r *http.Request) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s %s\n", r.Method, r.RequestURI, r.Proto)
+	fmt.Fprintf(&b, "Host: %s\n", r.Host)
+
+	names := make([]string, 0, len(r.Header))
+	for name := range r.Header {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		for _, value := range r.Header[name] {
+			fmt.Fprintf(&b, "%s: %s\n", name, value)
+		}
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 // formatBodyPreview formats the body content for preview

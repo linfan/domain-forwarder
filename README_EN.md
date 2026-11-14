@@ -123,7 +123,10 @@ Field-by-field defaults, validation rules and tuning advice live in
 ## Bundled Tools
 
 `tools/request-printer` is a companion service that logs every request it
-receives in JSON, useful for inspecting what the proxy forwards upstream
+receives in JSON. With `output_dir` (or `-output-dir` / `-o`) it also saves each
+request as `<microsecond timestamp>.header` (request line and headers as text)
+and `<microsecond timestamp>.body` (raw body, binary), appending `-2`, `-3`, ...
+on collisions. Useful for inspecting what the proxy forwards upstream
 (`make run-printer`). See [DEPLOY.md](DEPLOY.md#testing-utilities) for its
 configuration and the `make test` integration suite.
 
