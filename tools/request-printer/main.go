@@ -246,8 +246,10 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log to console
-	log.Printf("\n========== Incoming Request ==========\n%s\n=======================================\n", string(jsonData))
+	// Log to console, unless the full request is already saved on disk
+	if globalConfig.OutputDir == "" {
+		log.Printf("\n========== Incoming Request ==========\n%s\n=======================================\n", string(jsonData))
+	}
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

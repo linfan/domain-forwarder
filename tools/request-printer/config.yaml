@@ -5,6 +5,7 @@ addr: ":9090"
 max_body_read: 10485760  # 10MB
 
 # Directory to save each request as <timestamp>.header + <timestamp>.body.
+# When set, requests are saved instead of printed to stdout as JSON.
 # Empty means log to stdout only. Created on startup if missing.
 output_dir: ""
 

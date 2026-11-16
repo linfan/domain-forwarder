@@ -334,8 +334,9 @@ curl -x http://localhost:8080 http://localhost:9090/test?foo=bar
 
 It takes its settings from `tools/request-printer/config.yaml` (`addr`,
 `max_body_read`, `output_dir`, server timeouts) or the `-addr` / `-output-dir`
-(`-o`) flags. Set `output_dir` to also save every request on disk, one pair of
-files per request:
+(`-o`) flags. Set `output_dir` to save every request on disk instead of printing
+its JSON to the console — one pair of files per request, plus a single
+"Saved request" log line:
 
 ```
 <timestamp>.header   # request line + headers, text
