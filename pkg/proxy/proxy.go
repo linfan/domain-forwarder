@@ -19,14 +19,15 @@ import (
 
 // Config carries the settings the proxy handler needs.
 type Config struct {
-	Debug             bool
-	AddProxyHeaders   bool
-	EditHeaders       map[string]string // Headers set on forwarded plain-HTTP requests; nil disables editing
-	Mirror            *Mirror           // Async shadow delivery; nil disables mirroring
-	SourceIPBlacklist []string
-	Auth              *Auth         // nil disables proxy authentication
-	DialTimeout       time.Duration // CONNECT tunnel dial timeout
-	DialKeepAlive     time.Duration // CONNECT tunnel TCP keep-alive interval
+	Debug                 bool
+	AddProxyHeaders       bool
+	EditHeaders           map[string]string // Headers set on forwarded plain-HTTP requests; nil disables editing
+	Mirror                *Mirror           // Async shadow delivery; nil disables mirroring
+	SourceIPBlacklist     []string
+	TargetDomainWhitelist []string      // Allowed upstream hosts; empty disables the check
+	Auth                  *Auth         // nil disables proxy authentication
+	DialTimeout           time.Duration // CONNECT tunnel dial timeout
+	DialKeepAlive         time.Duration // CONNECT tunnel TCP keep-alive interval
 }
 
 // Server is the forward proxy HTTP handler.
@@ -62,6 +63,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Proxy-Authenticate", `Basic realm="domain-forwarder", charset="UTF-8"`)
 		http.Error(w, "Proxy Authentication Required", http.StatusProxyAuthRequired)
+		return
+	}
+
+	// The whitelist gates the destination for both plain HTTP and CONNECT, so a
+	// denied tunnel is never dialed.
+	if !forwarder.HostAllowed(s.config.TargetDomainWhitelist, r.Host) {
+		if s.config.Debug {
+			log.Printf("[BLOCKED] source=%s target=%s - target domain is not whitelisted", r.RemoteAddr, r.Host)
+		}
+		http.Error(w, "Forbidden: target domain is not allowed", http.StatusForbidden)
 		return
 	}
 

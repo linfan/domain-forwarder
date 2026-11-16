@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"domain-forwarder/pkg/forwarder"
@@ -113,15 +114,20 @@ func main() {
 	}
 
 	handler := proxy.New(engine, proxy.Config{
-		Debug:             cfg.Debug,
-		AddProxyHeaders:   cfg.AddProxyHeaders,
-		EditHeaders:       editHeaders,
-		Mirror:            mirror,
-		SourceIPBlacklist: cfg.SourceIPBlacklist,
-		Auth:              auth,
-		DialTimeout:       cfg.Forward.DialTimeout,
-		DialKeepAlive:     cfg.Forward.DialKeepAlive,
+		Debug:                 cfg.Debug,
+		AddProxyHeaders:       cfg.AddProxyHeaders,
+		EditHeaders:           editHeaders,
+		Mirror:                mirror,
+		SourceIPBlacklist:     cfg.SourceIPBlacklist,
+		TargetDomainWhitelist: cfg.TargetDomainWhitelist,
+		Auth:                  auth,
+		DialTimeout:           cfg.Forward.DialTimeout,
+		DialKeepAlive:         cfg.Forward.DialKeepAlive,
 	})
+
+	if len(cfg.TargetDomainWhitelist) > 0 {
+		log.Printf("Target domain whitelist enabled: %s", strings.Join(cfg.TargetDomainWhitelist, ", "))
+	}
 
 	server := &http.Server{
 		Addr:    cfg.Addr,

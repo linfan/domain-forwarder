@@ -49,6 +49,18 @@ source_ip_blacklist: []
 #   - 203.0.113.7
 #   - 192.168.0.0/16
 
+# Restrict which upstream hosts the proxy may reach. When non-empty, a plain
+# HTTP request or CONNECT tunnel whose target host is not listed is rejected
+# with 403 before any upstream connection is made. An empty list allows every
+# host. Entries are exact host names or IP literals, matched case-insensitively;
+# the request's port is ignored, so one entry covers every port. Subdomains are
+# not implied: list each host explicitly. No scheme, port, path or wildcard.
+target_domain_whitelist: []
+# target_domain_whitelist:
+#   - api.example.com
+#   - example.com
+#   - 127.0.0.1
+
 # Require HTTP Basic authentication from proxy clients. Unauthenticated or
 # invalid requests get 407 Proxy Authentication Required with a
 # Proxy-Authenticate challenge; this covers HTTP forwarding and CONNECT tunnels.

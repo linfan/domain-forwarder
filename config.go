@@ -166,17 +166,18 @@ func (lc *LogConfig) Enabled() bool {
 
 // Config represents the application configuration.
 type Config struct {
-	Addr              string        `yaml:"addr"`
-	Debug             bool          `yaml:"debug"`
-	AddProxyHeaders   bool          `yaml:"add_proxy_headers"`   // Add X-Forwarded-For/Proto/Host when forwarding
-	SourceIPBlacklist []string      `yaml:"source_ip_blacklist"` // Client IPs or CIDR ranges rejected with 403
-	Auth              AuthConfig    `yaml:"auth"`
-	Edit              EditConfig    `yaml:"edit"`
-	Mirror            MirrorConfig  `yaml:"mirror"`
-	Forward           ForwardConfig `yaml:"forward"`
-	Server            ServerConfig  `yaml:"server"`
-	Log               LogConfig     `yaml:"log"`
-	TLS               TLSConfig     `yaml:"tls"`
+	Addr                  string        `yaml:"addr"`
+	Debug                 bool          `yaml:"debug"`
+	AddProxyHeaders       bool          `yaml:"add_proxy_headers"`       // Add X-Forwarded-For/Proto/Host when forwarding
+	SourceIPBlacklist     []string      `yaml:"source_ip_blacklist"`     // Client IPs or CIDR ranges rejected with 403
+	TargetDomainWhitelist []string      `yaml:"target_domain_whitelist"` // Upstream hosts permitted through the proxy; empty allows all
+	Auth                  AuthConfig    `yaml:"auth"`
+	Edit                  EditConfig    `yaml:"edit"`
+	Mirror                MirrorConfig  `yaml:"mirror"`
+	Forward               ForwardConfig `yaml:"forward"`
+	Server                ServerConfig  `yaml:"server"`
+	Log                   LogConfig     `yaml:"log"`
+	TLS                   TLSConfig     `yaml:"tls"`
 }
 
 // defaultForwardConfig returns the built-in forward section defaults. The
@@ -258,6 +259,12 @@ func (cfg *Config) Validate() error {
 	for _, entry := range cfg.SourceIPBlacklist {
 		if err := validateBlacklistEntry(entry); err != nil {
 			return fmt.Errorf("source_ip_blacklist: %w", err)
+		}
+	}
+
+	for _, entry := range cfg.TargetDomainWhitelist {
+		if err := validateDomainEntry(entry); err != nil {
+			return fmt.Errorf("target_domain_whitelist: %w", err)
 		}
 	}
 
@@ -383,6 +390,18 @@ func validateBlacklistEntry(entry string) error {
 	}
 	if net.ParseIP(entry) == nil {
 		return fmt.Errorf("invalid IP address %q", entry)
+	}
+	return nil
+}
+
+// validateDomainEntry checks a single target_domain_whitelist entry, which must
+// be a bare host name or IP literal: no scheme, port, path or wildcard.
+func validateDomainEntry(entry string) error {
+	if entry == "" {
+		return fmt.Errorf("domain entry must not be empty")
+	}
+	if strings.ContainsAny(entry, "/:@?#*") || strings.ContainsAny(entry, " \t\r\n") {
+		return fmt.Errorf("invalid domain %q: must be a bare host name without scheme, port, path or wildcard", entry)
 	}
 	return nil
 }

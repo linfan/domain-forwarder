@@ -386,6 +386,35 @@ func AddForwardedHeaders(r *http.Request, scheme string) {
 	}
 }
 
+// HostAllowed reports whether hostport is covered by the whitelist. An empty
+// whitelist allows every host. Entries are exact host names or IP literals
+// matched case-insensitively; a port, IPv6 brackets and a trailing dot are
+// ignored on the request side.
+func HostAllowed(whitelist []string, hostport string) bool {
+	if len(whitelist) == 0 {
+		return true
+	}
+	host := hostOnly(hostport)
+	for _, allowed := range whitelist {
+		if strings.EqualFold(host, strings.TrimSuffix(allowed, ".")) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostOnly strips userinfo, the port and IPv6 brackets from a host:port
+// authority, so only the host the transport would actually dial remains.
+func hostOnly(hostport string) string {
+	if i := strings.LastIndexByte(hostport, '@'); i >= 0 {
+		hostport = hostport[i+1:]
+	}
+	if host, _, err := net.SplitHostPort(hostport); err == nil {
+		return strings.TrimSuffix(host, ".")
+	}
+	return strings.TrimSuffix(strings.Trim(hostport, "[]"), ".")
+}
+
 // IPBlacklisted reports whether the given IP address is covered by an entry of
 // the blacklist. Entries may be individual IPs or CIDR ranges.
 func IPBlacklisted(blacklist []string, ipStr string) bool {

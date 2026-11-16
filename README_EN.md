@@ -24,6 +24,9 @@ A high-performance HTTP/HTTPS forward proxy server written in Go.
 - **SSE-aware forwarding**: Streaming responses are flushed chunk by chunk and pass through uncompressed
 - **Timeouts**: Upstream dial/header/body-idle/body-duration and server read-header/idle timeouts are all configurable
 - **Source IP blacklist**: Reject individual IPs or CIDR ranges with 403
+- **Target domain whitelist**: When configured, only listed upstream hosts are
+  reachable; other HTTP requests and CONNECT tunnels get 403 before any upstream
+  connection is made
 - **Proxy authentication**: Require HTTP Basic authentication (single user,
   plaintext or bcrypt-hashed password); unauthenticated requests get 407
 - **Graceful shutdown**: SIGINT/SIGTERM drains in-flight requests within `server.shutdown_timeout`
@@ -85,6 +88,7 @@ command-line flags > config file > built-in defaults.
 The config is grouped into these sections:
 
 - Top level: `addr`, `debug`, `add_proxy_headers`, `source_ip_blacklist`,
+  `target_domain_whitelist` (allowed upstream hosts),
   `auth` (HTTP Basic authentication for proxy clients; single user, password
   plaintext or bcrypt hash), `edit` (adds headers before forwarding),
   `mirror` (asynchronous traffic mirroring)
@@ -117,6 +121,10 @@ Field-by-field defaults, validation rules and tuning advice live in
 - **Mirroring**: With `mirror` enabled, plain-HTTP requests are also delivered
   asynchronously to the mirror target; CONNECT is not mirrored and delivery
   failures are logged only when `debug` is on
+- **Target domain whitelist**: With a non-empty `target_domain_whitelist`, a
+  plain-HTTP request or CONNECT tunnel whose target host is not listed gets 403
+  and no upstream connection is made; matching ignores case and ports, and
+  subdomains must be listed explicitly
 - **Failures**: A forwarding failure before the response starts returns 502 Bad
   Gateway; failures after the response has started are only logged
 

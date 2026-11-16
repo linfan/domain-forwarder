@@ -25,6 +25,8 @@
 - **超时控制**：上游连接/响应头/响应体空闲/响应体总时长，以及服务端读请求头/空闲
   超时均可配置
 - **源 IP 黑名单**：可拒绝单个 IP 或 CIDR 网段，返回 403
+- **目标域名白名单**：配置后仅允许访问列表内的目标域名，其余请求与 CONNECT
+  隧道在建立上游连接前直接返回 403
 - **代理认证**：可要求客户端通过 HTTP Basic 认证（单用户，密码支持明文或 bcrypt
   哈希），未认证请求返回 407
 - **优雅退出**：收到 SIGINT/SIGTERM 后在 `server.shutdown_timeout` 内处理完在途请求
@@ -85,6 +87,7 @@ export https_proxy=http://localhost:8080
 配置分为以下几部分：
 
 - 顶层：`addr`、`debug`、`add_proxy_headers`、`source_ip_blacklist`、
+  `target_domain_whitelist`（目标域名白名单）、
   `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）、
   `edit`（转发前为请求追加 Header）、`mirror`（异步流量镜像）
 - `forward`：转发引擎参数（连接池容量、连接/TLS/响应头超时、
@@ -111,6 +114,9 @@ export https_proxy=http://localhost:8080
   缓冲区池
 - **镜像**：`mirror` 开启时，普通 HTTP 请求在转发的同时异步投递一份到镜像目标；
   CONNECT 不镜像，投递失败仅在 `debug` 模式下记录日志
+- **目标域名白名单**：配置非空 `target_domain_whitelist` 后，普通 HTTP 与 CONNECT
+  的目标主机不在列表内即返回 403，不会发起上游连接；匹配不区分大小写并忽略端口，
+  子域名需逐个列出
 - **失败处理**：响应开始前转发失败返回 502 Bad Gateway；响应已经开始后的失败
   仅记录日志
 
