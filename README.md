@@ -121,7 +121,8 @@ export https_proxy=http://localhost:8080
   解密后的请求依次经过 `add_proxy_headers`、`edit`、`mirror` 后重新以 HTTPS
   发往原目标。组按配置顺序首次匹配，`hosts` 支持精确主机、`*.example.com`
   （子域，不含裸域）和 `*`（全部域名）；未命中组的主机保持原始隧道。客户端需
-  信任对应组的 CA；证书固定（pinning）、上游 mTLS 和代理侧 HTTP/2 CONNECT
+  信任对应组的 CA，上游证书按系统信任库加上 `forward.upstream_ca_file` 校验；
+  证书固定（pinning）、上游 mTLS 和代理侧 HTTP/2 CONNECT
   的 HTTPS 拦截不支持，最后一种情况返回 501
 - **镜像**：`mirror` 开启时，转发请求在发送的同时异步投递一份到镜像目标；未解密
   的 CONNECT 不镜像，投递失败仅在 `debug` 模式下记录日志

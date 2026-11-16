@@ -128,6 +128,10 @@ forward:
   max_conns_per_host: 0          # Max total connections per upstream host; 0 = unlimited
   idle_conn_timeout: 90s         # How long an idle connection is kept before closing
   tls_handshake_timeout: 10s     # TLS handshake timeout for upstream connections
+  upstream_ca_file: ""           # PEM bundle of extra CAs trusted for upstream HTTPS, in
+                                 # addition to the system trust store. Interception re-dials the
+                                 # target as a TLS client, so hosts served from a private CA need
+                                 # their CA here; without it they fail with 502.
   expect_continue_timeout: 1s    # Wait for a 100-continue before sending the request body
   response_header_timeout: 30s   # Max wait for the upstream response headers
   dial_timeout: 10s              # TCP connect timeout (HTTP and CONNECT)

@@ -130,8 +130,10 @@ Field-by-field defaults, validation rules and tuning advice live in
   re-originated over HTTPS to the original target. Groups are matched in order;
   `hosts` accepts exact hosts, `*.example.com` (subdomains only) and `*` (every
   host). Unmatched CONNECTs stay opaque tunnels. Clients must trust the group's
-  CA; certificate pinning, upstream client certificates (mTLS) and interception
-  of proxy-side HTTP/2 CONNECT are unsupported, with the last case returning 501
+  CA, and upstream certificates are verified against the system trust store plus
+  `forward.upstream_ca_file`; certificate pinning, upstream client certificates
+  (mTLS) and interception of proxy-side HTTP/2 CONNECT are unsupported, with the
+  last case returning 501
 - **Mirroring**: With `mirror` enabled, forwarded requests are also delivered
   asynchronously to the mirror target; undecrypted CONNECTs are not mirrored and
   delivery failures are logged only when `debug` is on

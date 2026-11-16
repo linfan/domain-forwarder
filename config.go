@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/url"
@@ -79,6 +80,7 @@ type ForwardConfig struct {
 	MaxConnsPerHost       int           `yaml:"max_conns_per_host"`
 	IdleConnTimeout       time.Duration `yaml:"idle_conn_timeout"`
 	TLSHandshakeTimeout   time.Duration `yaml:"tls_handshake_timeout"`
+	UpstreamCAFile        string        `yaml:"upstream_ca_file"` // Extra PEM CAs trusted for upstream HTTPS, in addition to the system trust store
 	ExpectContinueTimeout time.Duration `yaml:"expect_continue_timeout"`
 	ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout"`
 	DialTimeout           time.Duration `yaml:"dial_timeout"`
@@ -102,6 +104,33 @@ func (fc *ForwardConfig) StreamingFlushEnabled() bool {
 // compressor, so events pile up there and reach the client in bursts.
 func (fc *ForwardConfig) CompressionDisabled() bool {
 	return fc.DisableCompression == nil || *fc.DisableCompression
+}
+
+// UpstreamTLSConfig builds the client TLS settings for every upstream HTTPS
+// connection. Certificates in upstream_ca_file are trusted in addition to the
+// system trust store; h2 is listed first so force_attempt_http2 keeps working,
+// which net/http only honors on a custom config that advertises it. Returns nil
+// when no file is configured, leaving the engine on the system trust store.
+func (fc *ForwardConfig) UpstreamTLSConfig() (*tls.Config, error) {
+	if fc.UpstreamCAFile == "" {
+		return nil, nil
+	}
+	bundle, err := os.ReadFile(fc.UpstreamCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("forward.upstream_ca_file: %w", err)
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		// Platforms without a readable system store still honor the configured CA.
+		roots = x509.NewCertPool()
+	}
+	if !roots.AppendCertsFromPEM(bundle) {
+		return nil, fmt.Errorf("forward.upstream_ca_file %s contains no certificates", fc.UpstreamCAFile)
+	}
+	return &tls.Config{
+		RootCAs:    roots,
+		NextProtos: []string{"h2", "http/1.1"},
+	}, nil
 }
 
 // Validate checks the forward section for semantic errors.
@@ -129,6 +158,9 @@ func (fc *ForwardConfig) Validate() error {
 		if d.value < 0 {
 			return fmt.Errorf("forward.%s must not be negative, got %s", d.name, d.value)
 		}
+	}
+	if _, err := fc.UpstreamTLSConfig(); err != nil {
+		return err
 	}
 	return nil
 }

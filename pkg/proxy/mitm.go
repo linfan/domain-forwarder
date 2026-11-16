@@ -272,6 +272,9 @@ func (s *Server) dialUpstream(r *http.Request, authority string) (net.Conn, erro
 	if s.config.TLSClientConfig != nil {
 		tlsConfig = s.config.TLSClientConfig.Clone()
 	}
+	// Only an upgrade handshake reaches here, and upgrades are HTTP/1.1, so ALPN
+	// must not select h2 even when the shared upstream config advertises it.
+	tlsConfig.NextProtos = []string{"http/1.1"}
 	if tlsConfig.ServerName == "" {
 		tlsConfig.ServerName = mitm.Host(authority)
 	}
