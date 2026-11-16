@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -91,8 +90,8 @@ func TestUpstreamTLSConfigTrustsPrivateCA(t *testing.T) {
 	if config.RootCAs == nil {
 		t.Fatal("RootCAs must be set")
 	}
-	if !slices.Contains(config.NextProtos, "h2") {
-		t.Error("NextProtos must advertise h2 so force_attempt_http2 keeps working")
+	if config.NextProtos != nil {
+		t.Errorf("NextProtos = %v, want nil so force_attempt_http2 alone decides ALPN", config.NextProtos)
 	}
 
 	// The pool must actually verify the private-CA upstream, which the system
@@ -111,6 +110,57 @@ func TestUpstreamTLSConfigTrustsPrivateCA(t *testing.T) {
 	}
 	if _, err := (&http.Client{}).Get(upstream.URL); err == nil {
 		t.Error("system trust store alone must not verify the private-CA upstream")
+	}
+}
+
+// TestUpstreamTLSConfigLeavesHTTP2ToTransport pins that a configured CA bundle
+// does not also turn HTTP/2 on or off: an h2-capable upstream is reached over
+// h2 only when force_attempt_http2 is set, never because the client config
+// advertised ALPN by itself.
+func TestUpstreamTLSConfigLeavesHTTP2ToTransport(t *testing.T) {
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	upstream.EnableHTTP2 = true
+	upstream.StartTLS()
+	defer upstream.Close()
+
+	caFile := filepath.Join(t.TempDir(), "upstream-ca.pem")
+	bundle := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: upstream.Certificate().Raw})
+	if err := os.WriteFile(caFile, bundle, 0o600); err != nil {
+		t.Fatalf("write CA file: %v", err)
+	}
+
+	// A fresh config per case: http.Transport rewrites NextProtos on first use,
+	// and reusing the mutated config would hide which switch enabled h2.
+	for _, tc := range []struct {
+		name       string
+		forceHTTP2 bool
+		wantProto  string
+	}{
+		{"force_attempt_http2 false", false, "HTTP/1.1"},
+		{"force_attempt_http2 true", true, "HTTP/2.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := defaultForwardConfig()
+			fc.UpstreamCAFile = caFile
+			config, err := fc.UpstreamTLSConfig()
+			if err != nil {
+				t.Fatalf("UpstreamTLSConfig: %v", err)
+			}
+			client := &http.Client{Transport: &http.Transport{
+				TLSClientConfig:   config,
+				ForceAttemptHTTP2: tc.forceHTTP2,
+			}}
+			resp, err := client.Get(upstream.URL)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.Proto != tc.wantProto {
+				t.Errorf("proto = %s, want %s", resp.Proto, tc.wantProto)
+			}
+		})
 	}
 }
 

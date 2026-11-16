@@ -119,9 +119,11 @@ func (fc *ForwardConfig) CompressionDisabled() bool {
 
 // UpstreamTLSConfig builds the client TLS settings for every upstream HTTPS
 // connection. Certificates in upstream_ca_file are trusted in addition to the
-// system trust store; h2 is listed first so force_attempt_http2 keeps working,
-// which net/http only honors on a custom config that advertises it. Returns nil
-// when no file is configured, leaving the engine on the system trust store.
+// system trust store. NextProtos is left nil on purpose: a custom TLS config no
+// longer disables HTTP/2 by itself, so force_attempt_http2 stays the only
+// switch, and listing h2 here would advertise a protocol the transport may not
+// be configured to speak. Returns nil when no file is configured, leaving the
+// engine on the system trust store.
 func (fc *ForwardConfig) UpstreamTLSConfig() (*tls.Config, error) {
 	if fc.UpstreamCAFile == "" {
 		return nil, nil
@@ -138,10 +140,7 @@ func (fc *ForwardConfig) UpstreamTLSConfig() (*tls.Config, error) {
 	if !roots.AppendCertsFromPEM(bundle) {
 		return nil, fmt.Errorf("forward.upstream_ca_file %s contains no certificates", fc.UpstreamCAFile)
 	}
-	return &tls.Config{
-		RootCAs:    roots,
-		NextProtos: []string{"h2", "http/1.1"},
-	}, nil
+	return &tls.Config{RootCAs: roots}, nil
 }
 
 // Validate checks the forward section for semantic errors.
