@@ -138,7 +138,11 @@ forward:
   max_idle_conns_per_host: 100   # Max idle connections per upstream host
   max_conns_per_host: 0          # Max total connections per upstream host; 0 = unlimited
   idle_conn_timeout: 90s         # How long an idle connection is kept before closing
-  tls_handshake_timeout: 10s     # TLS handshake timeout for upstream connections
+  tls_handshake_timeout: 10s     # TLS handshake timeout for upstream connections. Inside an
+                                 # intercepted tunnel it also bounds the wait for the client's
+                                 # first ClientHello byte after 200 Connection Established; a
+                                 # client that sends nothing gets that tunnel closed after this
+                                 # long (0 falls back to 10s there, it never means "unlimited").
   upstream_ca_file: ""           # PEM bundle of extra CAs trusted for upstream HTTPS, in
                                  # addition to the system trust store. Interception re-dials the
                                  # target as a TLS client, so hosts served from a private CA need
@@ -148,7 +152,9 @@ forward:
   dial_timeout: 10s              # TCP connect timeout (HTTP and CONNECT)
   dial_keep_alive: 30s           # TCP keep-alive interval (HTTP and CONNECT)
   request_timeout: 60s           # Max wait for upstream response headers incl. dialing;
-                                 # does not limit body transfer (0 = disabled)
+                                 # does not limit body transfer (0 = disabled). mitm applies it
+                                 # to each decrypted request it re-originates, not to the
+                                 # tunnel that carries them.
   stream_idle_timeout: 0s        # Abort a response body that receives no bytes for this
                                  # long; 0s = disabled (e.g. 120s)
   response_body_timeout: 0s      # Total duration cap for a non-streaming response body;
@@ -158,7 +164,12 @@ forward:
                                  # compressing gateway cannot buffer SSE streams in bursts
   force_attempt_http2: true      # Attempt HTTP/2 for TLS upstream connections
 
-# HTTP server settings for the proxy listener
+# HTTP server settings for the proxy listener. Intercepted tunnels serve their
+# decrypted requests through these same limits: read_header_timeout bounds each
+# request head inside the tunnel and idle_timeout the keep-alive gap between
+# them, so a client that stops talking is dropped. What none of these bounds is a
+# body that stops mid-transfer, in either direction: that is the same as an
+# ordinary proxied request, so long uploads and downloads are never cut short.
 server:
   read_header_timeout: 10s       # Max time to read the request headers
   idle_timeout: 120s             # How long an idle keep-alive connection is kept
