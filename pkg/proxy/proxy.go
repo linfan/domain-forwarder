@@ -173,6 +173,11 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, target, scheme 
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if group, ok := s.config.MITM.Match(r.Host); ok {
 		if r.ProtoMajor >= 2 {
+			// Intercepting an HTTP/2 CONNECT stream would need a second tunnel
+			// inside the stream, which is not implemented. The rejection is
+			// reported here because no tunnel summary line follows it.
+			log.Printf("[CONNECT] proto=%s source=%s target=%s group=%s outcome=mitm_not_supported",
+				protoName(r), r.RemoteAddr, r.Host, group.Name)
 			http.Error(w, "Not Implemented: HTTPS interception over HTTP/2 CONNECT is not supported", http.StatusNotImplemented)
 			return
 		}

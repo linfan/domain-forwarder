@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -12,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -187,10 +189,23 @@ func TestMITMRejectsProxyHTTP2CONNECT(t *testing.T) {
 	req.Proto = "HTTP/2.0"
 	req.ProtoMajor = 2
 	req.ProtoMinor = 0
+
+	var logged bytes.Buffer
+	flags := log.Flags()
+	log.SetFlags(0)
+	log.SetOutput(&logged)
+	defer func() { log.SetFlags(flags); log.SetOutput(os.Stderr) }()
+
 	resp := httptest.NewRecorder()
 	server.ServeHTTP(resp, req)
 	if resp.Code != http.StatusNotImplemented {
 		t.Fatalf("proxy-side HTTP/2 CONNECT status = %d, want 501", resp.Code)
+	}
+	// Nothing else records this rejection: no tunnel is opened, so no summary
+	// line would be written.
+	if line := logged.String(); !strings.Contains(line, "outcome=mitm_not_supported") ||
+		!strings.Contains(line, "target=example.com:443") {
+		t.Errorf("rejection log = %q, want the target and outcome=mitm_not_supported", line)
 	}
 }
 

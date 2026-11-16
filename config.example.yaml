@@ -49,7 +49,8 @@ mirror:
 # each one to the original target over HTTPS. CONNECT targets that match no
 # group stay opaque TCP tunnels. Clients must trust the group's CA; certificate
 # pinning and upstream client certificates (mTLS) are not supported. A matching
-# proxy-side HTTP/2 CONNECT returns 501; HTTP/2 inside intercepted tunnels works.
+# proxy-side HTTP/2 CONNECT returns 501 and is logged with
+# outcome=mitm_not_supported; HTTP/2 inside intercepted tunnels works.
 #
 # Minted leaves are valid for 7 days (or until the CA expires, if sooner) and are
 # cached per host. A cached leaf is re-minted before it expires, so a proxy that
