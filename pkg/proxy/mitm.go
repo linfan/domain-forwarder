@@ -187,15 +187,6 @@ func (s *Server) relayUpgrade(w http.ResponseWriter, r *http.Request, authority 
 		return
 	}
 
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		defer upstream.Close()
-		defer resp.Body.Close()
-		if err := resp.Write(w); err != nil && s.config.Debug {
-			log.Printf("Error relaying upgrade response from %s: %v", authority, err)
-		}
-		return
-	}
-
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		_ = upstream.Close()
@@ -206,6 +197,20 @@ func (s *Server) relayUpgrade(w http.ResponseWriter, r *http.Request, authority 
 	if err != nil {
 		_ = upstream.Close()
 		log.Printf("Error hijacking upgrade connection: %v", err)
+		return
+	}
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		// The upgrade was refused. Hand the upstream response to the client as
+		// raw bytes: writing it through the ResponseWriter would prefix it with a
+		// status line of its own, so the client would parse one response as two.
+		writeErr := resp.Write(clientConn)
+		_ = resp.Body.Close()
+		_ = upstream.Close()
+		_ = clientConn.Close()
+		if writeErr != nil && s.config.Debug {
+			log.Printf("Error relaying upgrade response from %s: %v", authority, writeErr)
+		}
 		return
 	}
 

@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -281,6 +282,76 @@ func TestMITMWebSocketUpgrade(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("upstream did not receive the upgrade handshake")
+	}
+}
+
+// TestMITMUpgradeRefused checks a refused protocol upgrade: the upstream answers
+// the upgrade request with a plain error response, which must reach the client
+// as exactly one response, with the upstream status preserved.
+func TestMITMUpgradeRefused(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, "refused")
+	}))
+	defer upstream.Close()
+
+	proxyServer, caRoots := newTestMITMProxy(t, []string{"127.0.0.1"}, map[string]string{"X-Edit": "yes"}, nil, rootPool(upstream.Certificate()))
+	defer proxyServer.Close()
+
+	upstreamAddr := strings.TrimPrefix(upstream.URL, "https://")
+	conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	_, _ = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", upstreamAddr, upstreamAddr)
+	reader := bufio.NewReader(conn)
+	connectResp, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		t.Fatalf("read CONNECT response: %v", err)
+	}
+	if connectResp.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT status = %d", connectResp.StatusCode)
+	}
+
+	upstreamHost, _, err := net.SplitHostPort(upstreamAddr)
+	if err != nil {
+		t.Fatalf("split upstream address: %v", err)
+	}
+	tlsConn := tls.Client(conn, &tls.Config{RootCAs: caRoots, ServerName: upstreamHost})
+	if err := tlsConn.Handshake(); err != nil {
+		t.Fatalf("TLS handshake with MITM: %v", err)
+	}
+	defer tlsConn.Close()
+
+	_, err = fmt.Fprintf(tlsConn, "GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", upstreamAddr)
+	if err != nil {
+		t.Fatalf("write upgrade request: %v", err)
+	}
+
+	// The tunnel only carries the upstream response: nothing may be wrapped in a
+	// second status line, and the connection ends after it.
+	responseReader := bufio.NewReader(tlsConn)
+	resp, err := http.ReadResponse(responseReader, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatalf("read refused upgrade response: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("upgrade status = %d, want 503", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "refused" {
+		t.Fatalf("body = %q, want refused", body)
+	}
+	rest, readErr := io.ReadAll(responseReader)
+	if len(rest) != 0 {
+		t.Fatalf("extra bytes after the response: %q", rest)
+	}
+	if readErr != nil && !errors.Is(readErr, io.ErrUnexpectedEOF) && !errors.Is(readErr, net.ErrClosed) {
+		t.Fatalf("read after response: %v", readErr)
 	}
 }
 
