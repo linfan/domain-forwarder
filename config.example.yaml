@@ -14,21 +14,22 @@ debug: false
 # Add X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host to forwarded requests
 add_proxy_headers: false
 
-# Edit requests before they are forwarded. Currently only adding headers is
-# supported. Applied to plain HTTP requests only: a CONNECT tunnel carries no
-# HTTP request to edit. Headers are set (a same-name header from the client or
-# from add_proxy_headers is overwritten) and validated at startup: names must
-# be RFC 7230 tokens, values must not contain CR, LF or NUL.
+# Edits requests before they are forwarded. Currently only adding headers is
+# supported. Headers are set (a same-name header from the client or from
+# add_proxy_headers is overwritten) and validated at startup: names must be
+# RFC 7230 tokens, values must not contain CR, LF or NUL. HTTPS requests are
+# editable only when their CONNECT target matches a group in the mitm section.
 edit:
   enabled: false
   add_headers:
     # X-Proxy-Name: domain-forwarder
     # X-Environment: prod
 
-# Mirror every plain-HTTP proxy request to a second HTTP service. Delivery is
+# Mirror every forwarded proxy request to a second HTTP service. Delivery is
 # asynchronous and best-effort: a slow, failing or overloaded mirror never
-# delays or fails the original request. CONNECT tunnels are not mirrored,
-# because their content is an opaque TLS stream.
+# delays or fails the original request. Requests decrypted by mitm are mirrored
+# too; CONNECT tunnels outside mitm groups are not, because their content is an
+# opaque TLS stream.
 #
 # The mirrored copy keeps the method, headers (post-edit, hop-by-hop removed)
 # and body. Its URL is target + the original path/query, its Host is the mirror
@@ -41,6 +42,34 @@ mirror:
   timeout: 5s                    # Per-delivery timeout (connect + request + response)
   max_body_bytes: 1048576        # Capture at most 1 MiB of the request body; 0 = bodies are never mirrored
   queue_size: 256                # Pending mirror jobs; overflow is dropped silently
+
+# HTTPS interception. When an HTTP/1.1 CONNECT target matches a group, the proxy
+# terminates TLS locally using a certificate minted by that group's CA, applies
+# add_proxy_headers / edit / mirror to the decrypted requests, then re-originates
+# each one to the original target over HTTPS. CONNECT targets that match no
+# group stay opaque TCP tunnels. Clients must trust the group's CA; certificate
+# pinning and upstream client certificates (mTLS) are not supported. A matching
+# proxy-side HTTP/2 CONNECT returns 501; HTTP/2 inside intercepted tunnels works.
+#
+# Groups are evaluated in order and the first match wins. Host patterns are "*"
+# (every host), "*.example.com" (subdomains only, not the bare domain), a bare
+# host name, or an IP literal; ports are ignored. A "*" group makes every later
+# group unreachable, so place it last.
+mitm:
+  enabled: false
+  groups: []
+  # groups:
+  #   - name: internal
+  #     ca_cert_file: /etc/domain-forwarder/mitm-internal-ca.crt
+  #     ca_key_file: /etc/domain-forwarder/mitm-internal-ca.key
+  #     hosts:
+  #       - api.example.com
+  #       - "*.internal.example.com"
+  #   - name: all
+  #     ca_cert_file: /etc/domain-forwarder/mitm-ca.crt
+  #     ca_key_file: /etc/domain-forwarder/mitm-ca.key
+  #     hosts:
+  #       - "*"
 
 # Request access control, enforced before any upstream connection is made.
 # Both source_ip and target_domain accept a blacklist and a whitelist:

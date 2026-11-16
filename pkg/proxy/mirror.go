@@ -27,11 +27,11 @@ type MirrorConfig struct {
 	Debug        bool
 }
 
-// Mirror delivers an asynchronous copy of every plain-HTTP proxy request to a
+// Mirror delivers an asynchronous copy of every forwarded proxy request to a
 // secondary HTTP target. Delivery is best-effort: the queue is bounded and
 // every failure (overflow, dial error, timeout) is dropped silently unless
-// debug is on. CONNECT tunnels are not mirrored, since their content is an
-// opaque TLS stream.
+// debug is on. CONNECT tunnels are mirrored only when mitm decrypts them; an
+// opaque tunnel carries a TLS stream with no HTTP request to snapshot.
 type Mirror struct {
 	target  *url.URL
 	timeout time.Duration
@@ -98,7 +98,10 @@ func (m *Mirror) prepare(r *http.Request) {
 		url:    m.mirrorURL(r.URL),
 		header: mirrorHeaders(r),
 	}
-	if r.Body == nil || r.Body == http.NoBody {
+	// HTTP/2 servers hand out a non-NoBody body even for bodyless requests, so
+	// ContentLength 0 must be treated as "no body" or the mirror would wait for
+	// an EOF the transport never reports.
+	if r.Body == nil || r.Body == http.NoBody || r.ContentLength == 0 {
 		m.enqueue(job)
 		return
 	}

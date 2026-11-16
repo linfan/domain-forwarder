@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"domain-forwarder/pkg/forwarder"
+	"domain-forwarder/pkg/mitm"
 
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
@@ -32,14 +33,31 @@ type AuthConfig struct {
 }
 
 // EditConfig configures request edits applied before forwarding. AddHeaders
-// sets (overwrites) headers on every forwarded plain-HTTP request; CONNECT
-// tunnels carry no HTTP request to edit.
+// sets (overwrites) headers on every forwarded request. HTTPS requests are only
+// editable when their CONNECT target matches a mitm group.
 type EditConfig struct {
 	Enabled    bool              `yaml:"enabled"`
 	AddHeaders map[string]string `yaml:"add_headers"`
 }
 
-// MirrorConfig configures best-effort traffic mirroring: every plain-HTTP proxy
+// MITMGroupConfig is one interception group: the hosts it covers and the CA
+// that signs the certificates presented to clients for those hosts.
+type MITMGroupConfig struct {
+	Name       string   `yaml:"name"`
+	CACertFile string   `yaml:"ca_cert_file"`
+	CAKeyFile  string   `yaml:"ca_key_file"`
+	Hosts      []string `yaml:"hosts"` // "*", "*.example.com", a bare host name or an IP literal
+}
+
+// MITMConfig configures HTTPS interception. Only CONNECT targets matching a
+// group are decrypted; everything else stays an opaque TCP tunnel. Groups are
+// evaluated in order and the first match wins.
+type MITMConfig struct {
+	Enabled bool              `yaml:"enabled"`
+	Groups  []MITMGroupConfig `yaml:"groups"`
+}
+
+// MirrorConfig configures best-effort traffic mirroring: every forwarded proxy
 // request is also delivered, asynchronously, to Target. Delivery failures and
 // queue overflow never affect the original request.
 type MirrorConfig struct {
@@ -188,6 +206,7 @@ type Config struct {
 	Auth            AuthConfig          `yaml:"auth"`
 	Edit            EditConfig          `yaml:"edit"`
 	Mirror          MirrorConfig        `yaml:"mirror"`
+	MITM            MITMConfig          `yaml:"mitm"`
 	Forward         ForwardConfig       `yaml:"forward"`
 	Server          ServerConfig        `yaml:"server"`
 	Log             LogConfig           `yaml:"log"`
@@ -319,6 +338,10 @@ func (cfg *Config) Validate() error {
 		return err
 	}
 
+	if err := cfg.MITM.Validate(); err != nil {
+		return err
+	}
+
 	if cfg.TLS.Enabled {
 		if cfg.TLS.CertFile == "" {
 			return fmt.Errorf("tls.cert_file is required when tls is enabled")
@@ -363,6 +386,42 @@ func (mc *MirrorConfig) Validate() error {
 	}
 	if mc.QueueSize <= 0 {
 		return fmt.Errorf("mirror.queue_size must be positive, got %d", mc.QueueSize)
+	}
+	return nil
+}
+
+// Validate checks the mitm section for semantic errors.
+func (mc *MITMConfig) Validate() error {
+	if !mc.Enabled {
+		return nil
+	}
+	if len(mc.Groups) == 0 {
+		return fmt.Errorf("mitm.groups must contain at least one group when mitm is enabled")
+	}
+	for i, group := range mc.Groups {
+		name := group.Name
+		if name == "" {
+			name = fmt.Sprintf("group %d", i+1)
+		}
+		if group.CACertFile == "" {
+			return fmt.Errorf("mitm.groups[%d] (%s): ca_cert_file is required", i, name)
+		}
+		if group.CAKeyFile == "" {
+			return fmt.Errorf("mitm.groups[%d] (%s): ca_key_file is required", i, name)
+		}
+		for _, path := range []string{group.CACertFile, group.CAKeyFile} {
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				return fmt.Errorf("mitm.groups[%d] (%s): file not found: %s", i, name, path)
+			}
+		}
+		if len(group.Hosts) == 0 {
+			return fmt.Errorf("mitm.groups[%d] (%s): hosts must not be empty", i, name)
+		}
+		for _, host := range group.Hosts {
+			if err := mitm.ValidateHostPattern(host); err != nil {
+				return fmt.Errorf("mitm.groups[%d] (%s): %w", i, name, err)
+			}
+		}
 	}
 	return nil
 }

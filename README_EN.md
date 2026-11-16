@@ -17,10 +17,15 @@ A high-performance HTTP/HTTPS forward proxy server written in Go.
 - **Hop-by-hop header handling**: RFC 7230-compliant header stripping, including `Connection`-listed tokens
 - **X-Forwarded-For**: Optionally tracks the original client address (`add_proxy_headers`)
 - **Request editing**: Adds custom headers to forwarded requests (`edit`);
-  a same-name header is overwritten
+  a same-name header is overwritten. HTTPS requests covered by a `mitm` group
+  are editable too
+- **HTTPS interception**: Per-group CAs and host rules terminate TLS locally for
+  matching HTTP/1.1 CONNECTs, edit the decrypted requests and re-originate them
+  over HTTPS; supports exact hosts, `*.example.com` and a `*` catch-all
 - **Traffic mirroring**: Optionally delivers an asynchronous copy of every
-  plain-HTTP request to a second HTTP service (`mirror`); failures are silent
-  and never affect the original request
+  forwarded request to a second HTTP service (`mirror`); failures are silent
+  and never affect the original request. HTTPS requests decrypted by `mitm` are
+  mirrored as well
 - **SSE-aware forwarding**: Streaming responses are flushed chunk by chunk and pass through uncompressed
 - **Timeouts**: Upstream dial/header/body-idle/body-duration and server read-header/idle timeouts are all configurable
 - **Access control**: Reject blacklisted source IPs or target hosts with 403;
@@ -89,7 +94,8 @@ The config is grouped into these sections:
   `access_control` (source-IP and target-domain blacklists/whitelists),
   `auth` (HTTP Basic authentication for proxy clients; single user, password
   plaintext or bcrypt hash), `edit` (adds headers before forwarding),
-  `mirror` (asynchronous traffic mirroring)
+  `mirror` (asynchronous traffic mirroring),
+  `mitm` (HTTPS interception groups and host rules)
 - `forward`: forwarding-engine parameters (pool sizes, dial/TLS/header
   timeouts, `request_timeout`, `stream_idle_timeout`, `response_body_timeout`,
   `streaming_flush`, `disable_compression`, `force_attempt_http2`,
@@ -103,7 +109,8 @@ Field-by-field defaults, validation rules and tuning advice live in
 
 ## Request Forwarding Behavior
 
-- **Method**: Preserved for HTTP; `CONNECT` opens a raw TCP tunnel
+- **Method**: Preserved for HTTP; `CONNECT` opens a raw TCP tunnel unless its
+  target matches a `mitm` group
 - **Headers**: Hop-by-hop headers are stripped in both directions, including the
   tokens listed in a `Connection` header. The client's `Accept-Encoding` is
   forwarded as-is (a forward proxy stays transparent); `Proxy-Authorization` is
@@ -116,9 +123,18 @@ Field-by-field defaults, validation rules and tuning advice live in
   HTTP/2 CONNECT relays data inside the stream; both use
   `forward.dial_timeout` / `forward.dial_keep_alive` and reuse the engine's
   buffer pool
-- **Mirroring**: With `mirror` enabled, plain-HTTP requests are also delivered
-  asynchronously to the mirror target; CONNECT is not mirrored and delivery
-  failures are logged only when `debug` is on
+- **HTTPS interception**: An HTTP/1.1 CONNECT matching a `mitm` group is
+  terminated locally, serving HTTP/1.1 and HTTP/2 inside the tunnel; WebSocket
+  upgrades have their handshake edited and are then relayed raw. Decrypted
+  requests run through `add_proxy_headers`, `edit` and `mirror` before being
+  re-originated over HTTPS to the original target. Groups are matched in order;
+  `hosts` accepts exact hosts, `*.example.com` (subdomains only) and `*` (every
+  host). Unmatched CONNECTs stay opaque tunnels. Clients must trust the group's
+  CA; certificate pinning, upstream client certificates (mTLS) and interception
+  of proxy-side HTTP/2 CONNECT are unsupported, with the last case returning 501
+- **Mirroring**: With `mirror` enabled, forwarded requests are also delivered
+  asynchronously to the mirror target; undecrypted CONNECTs are not mirrored and
+  delivery failures are logged only when `debug` is on
 - **Access control**: `access_control.source_ip` and
   `access_control.target_domain` each take a `blacklist` and a `whitelist`; a
   blacklist match gets 403, and a non-empty whitelist admits only listed
@@ -145,7 +161,9 @@ domain-forwarder/
 ├── main.go                      # Flags, startup, graceful shutdown
 ├── config.go                    # Configuration types, defaults, loading, validation
 ├── pkg/
+│   ├── mitm/mitm.go             # Per-host certificates from group CAs; host matching
 │   ├── proxy/proxy.go           # Forward proxy handler (CONNECT tunnel + HTTP)
+│   ├── proxy/mitm.go            # CONNECT TLS termination, HTTP/2 and WebSocket relay
 │   └── forwarder/forwarder.go   # HTTP forwarding engine (pooling, timeouts, streaming relay)
 ├── tools/request-printer/       # Test/debug request logger
 ├── config.example.yaml          # Annotated config template (copy to config.yaml)

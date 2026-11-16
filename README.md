@@ -18,9 +18,12 @@
 - **逐跳头处理**：按 RFC 7230 剥离逐跳头（hop-by-hop header），包括 `Connection`
   头中列出的字段
 - **X-Forwarded-For**：可选记录客户端原始地址（`add_proxy_headers`）
-- **请求编辑**：转发前为请求追加自定义 Header（`edit`），同名 Header 会被覆盖
-- **流量镜像**：可选把普通 HTTP 请求异步复制一份投递到另一个 HTTP 服务（`mirror`），
-  镜像失败静默处理，不影响原请求
+- **请求编辑**：转发前为请求追加自定义 Header（`edit`），同名 Header 会被覆盖；
+  命中 `mitm` 证书组的 HTTPS 请求同样可编辑
+- **HTTPS 拦截编辑**：按域名分组配置 CA，命中的 HTTP/1.1 CONNECT 在本地终止
+  TLS、编辑后重新以 HTTPS 发往目标；支持精确主机、`*.example.com` 和 `*` 兜底规则
+- **流量镜像**：可选把转发请求异步复制一份投递到另一个 HTTP 服务（`mirror`），
+  镜像失败静默处理，不影响原请求；被 `mitm` 解密后的 HTTPS 请求也会镜像
 - **SSE 友好转发**：流式响应逐块 flush，并以不压缩的方式透传
 - **超时控制**：上游连接/响应头/响应体空闲/响应体总时长，以及服务端读请求头/空闲
   超时均可配置
@@ -89,7 +92,8 @@ export https_proxy=http://localhost:8080
 - 顶层：`addr`、`debug`、`add_proxy_headers`、
   `access_control`（按来源 IP 与目标域名配置黑名单/白名单）、
   `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）、
-  `edit`（转发前为请求追加 Header）、`mirror`（异步流量镜像）
+  `edit`（转发前为请求追加 Header）、`mirror`（异步流量镜像）、
+  `mitm`（HTTPS 拦截证书组与域名规则）
 - `forward`：转发引擎参数（连接池容量、连接/TLS/响应头超时、
   `request_timeout`、`stream_idle_timeout`、`response_body_timeout`、
   `streaming_flush`、`disable_compression`、`force_attempt_http2`、
@@ -102,7 +106,7 @@ export https_proxy=http://localhost:8080
 
 ## 请求转发行为
 
-- **方法**：HTTP 请求原样保留方法；`CONNECT` 建立原始 TCP 隧道
+- **方法**：HTTP 请求原样保留方法；未命中 `mitm` 组的 `CONNECT` 建立原始 TCP 隧道
 - **请求头**：双向剥离逐跳头，包括 `Connection` 头中列出的字段。客户端的
   `Accept-Encoding` 原样转发（正向代理保持透明）；`Proxy-Authorization` 仅由
   代理消费，不会转发给上游
@@ -112,8 +116,15 @@ export https_proxy=http://localhost:8080
 - **隧道**：HTTP/1.1 CONNECT 劫持为原始 TCP 隧道，HTTP/2 CONNECT 在流内转发；
   两者都使用 `forward.dial_timeout` / `forward.dial_keep_alive`，并复用引擎的
   缓冲区池
-- **镜像**：`mirror` 开启时，普通 HTTP 请求在转发的同时异步投递一份到镜像目标；
-  CONNECT 不镜像，投递失败仅在 `debug` 模式下记录日志
+- **HTTPS 拦截**：命中 `mitm` 组的 HTTP/1.1 CONNECT 在本地终止 TLS，隧道内的
+  客户端请求支持 HTTP/1.1 与 HTTP/2，WebSocket 升级会先编辑握手头再双向转发；
+  解密后的请求依次经过 `add_proxy_headers`、`edit`、`mirror` 后重新以 HTTPS
+  发往原目标。组按配置顺序首次匹配，`hosts` 支持精确主机、`*.example.com`
+  （子域，不含裸域）和 `*`（全部域名）；未命中组的主机保持原始隧道。客户端需
+  信任对应组的 CA；证书固定（pinning）、上游 mTLS 和代理侧 HTTP/2 CONNECT
+  的 HTTPS 拦截不支持，最后一种情况返回 501
+- **镜像**：`mirror` 开启时，转发请求在发送的同时异步投递一份到镜像目标；未解密
+  的 CONNECT 不镜像，投递失败仅在 `debug` 模式下记录日志
 - **访问控制**：`access_control.source_ip` 与 `access_control.target_domain` 各自
   支持 `blacklist` / `whitelist`；命中黑名单返回 403，白名单非空时仅放行列表内的
   请求。目标域名匹配不区分大小写并忽略端口，子域名需逐个列出；普通 HTTP 与
@@ -136,7 +147,9 @@ domain-forwarder/
 ├── main.go                      # 命令行参数、启动流程、优雅退出
 ├── config.go                    # 配置类型、默认值、加载与校验
 ├── pkg/
+│   ├── mitm/mitm.go             # CA 签发每域名证书、按组匹配 CONNECT 主机
 │   ├── proxy/proxy.go           # 正向代理处理器（CONNECT 隧道 + HTTP 转发）
+│   ├── proxy/mitm.go            # CONNECT TLS 终止、HTTP/2/WebSocket 转发
 │   └── forwarder/forwarder.go   # HTTP 转发引擎（连接池、超时、流式拷贝）
 ├── tools/request-printer/       # 调试用请求日志服务
 ├── config.example.yaml          # 带注释的配置模板（复制为 config.yaml）

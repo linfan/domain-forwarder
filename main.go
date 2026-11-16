@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"domain-forwarder/pkg/forwarder"
+	"domain-forwarder/pkg/mitm"
 	"domain-forwarder/pkg/proxy"
 
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -113,11 +114,36 @@ func main() {
 		log.Printf("Mirroring HTTP requests to %s", cfg.Mirror.Target)
 	}
 
+	var mitmConfig *mitm.Config
+	if cfg.MITM.Enabled {
+		mitmConfig = &mitm.Config{}
+		for i, groupConfig := range cfg.MITM.Groups {
+			name := groupConfig.Name
+			if name == "" {
+				name = fmt.Sprintf("group-%d", i+1)
+			}
+			authority, err := mitm.NewAuthority(groupConfig.CACertFile, groupConfig.CAKeyFile)
+			if err != nil {
+				log.Fatalf("Invalid mitm.groups[%d] (%s): %v", i, name, err)
+			}
+			group, err := mitm.NewGroup(name, groupConfig.Hosts, authority)
+			if err != nil {
+				log.Fatalf("Invalid mitm.groups[%d]: %v", i, err)
+			}
+			mitmConfig.Groups = append(mitmConfig.Groups, group)
+		}
+		logMITMWarnings(mitmConfig)
+		for _, group := range mitmConfig.Groups {
+			log.Printf("HTTPS interception group %q: %s", group.Name, strings.Join(group.Hosts(), ", "))
+		}
+	}
+
 	handler := proxy.New(engine, proxy.Config{
 		Debug:           cfg.Debug,
 		AddProxyHeaders: cfg.AddProxyHeaders,
 		EditHeaders:     editHeaders,
 		Mirror:          mirror,
+		MITM:            mitmConfig,
 		AccessControl: proxy.AccessControl{
 			SourceIP: proxy.AccessList{
 				Blacklist: cfg.AccessControl.SourceIP.Blacklist,
@@ -128,9 +154,13 @@ func main() {
 				Whitelist: cfg.AccessControl.TargetDomain.Whitelist,
 			},
 		},
-		Auth:          auth,
-		DialTimeout:   cfg.Forward.DialTimeout,
-		DialKeepAlive: cfg.Forward.DialKeepAlive,
+		Auth:                auth,
+		DialTimeout:         cfg.Forward.DialTimeout,
+		DialKeepAlive:       cfg.Forward.DialKeepAlive,
+		TLSHandshakeTimeout: cfg.Forward.TLSHandshakeTimeout,
+		ReadHeaderTimeout:   cfg.Server.ReadHeaderTimeout,
+		IdleTimeout:         cfg.Server.IdleTimeout,
+		MaxHeaderBytes:      cfg.Server.MaxHeaderBytes,
 	})
 
 	if len(cfg.AccessControl.TargetDomain.Whitelist) > 0 {
@@ -196,4 +226,29 @@ func main() {
 		os.Exit(exitCode)
 	}
 	log.Println("Server stopped")
+}
+
+// logMITMWarnings reports catch-all and duplicated host patterns. Both are
+// legal, but a "*" group makes every later group unreachable and a host listed
+// twice is only ever matched by the first group.
+func logMITMWarnings(config *mitm.Config) {
+	owners := make(map[string]string)
+	for i, group := range config.Groups {
+		for _, host := range group.Hosts() {
+			key := strings.ToLower(strings.TrimSuffix(host, "."))
+			if previous, ok := owners[key]; ok {
+				log.Printf("WARNING: mitm host %q is also configured in group %q; group %q is never matched for it",
+					host, previous, group.Name)
+			} else {
+				owners[key] = group.Name
+			}
+			if host == "*" {
+				log.Printf("WARNING: mitm group %q matches every host; all HTTPS traffic will be decrypted with its CA", group.Name)
+				if i+1 < len(config.Groups) {
+					log.Printf("WARNING: %d mitm group(s) after %q are unreachable because group %q matches every host",
+						len(config.Groups)-i-1, group.Name, group.Name)
+				}
+			}
+		}
+	}
 }

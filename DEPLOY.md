@@ -34,9 +34,11 @@ or wildcard), `auth` enabled without a username or password, a username containi
 that is not a valid bcrypt hash, an `edit.add_headers` entry whose name is not
 an RFC 7230 token or whose value contains CR/LF/NUL, `mirror` enabled with a
 missing, non-http(s), host-less or query/fragment-bearing `mirror.target` or
-with non-positive `timeout`/`queue_size`, or missing, unreadable or mismatched
-certificate/key files when `tls.enabled` is true. `0` is returned after a
-graceful SIGINT/SIGTERM shutdown.
+with non-positive `timeout`/`queue_size`, `mitm` enabled with no groups, a group
+without `ca_cert_file`/`ca_key_file`/`hosts` or with missing CA files, a `mitm`
+host pattern that is not `*`, `*.example.com`, a bare host name or an IP literal,
+or missing, unreadable or mismatched certificate/key files when `tls.enabled` is
+true. `0` is returned after a graceful SIGINT/SIGTERM shutdown.
 
 ## HTTPS Proxy with Let's Encrypt
 
@@ -133,6 +135,80 @@ plain `http://` proxy listener can read them; pair authentication with
 `tls.enabled`. Browsers prompt for the credentials after the first 407 and
 reuse them for later requests and CONNECT tunnels. Configuration changes
 require a restart (there is no hot reload).
+
+## HTTPS Interception
+
+`mitm` makes matching HTTP/1.1 CONNECT tunnels editable: the proxy terminates
+TLS locally with a certificate minted by the group's CA, runs the decrypted
+request through `add_proxy_headers` / `edit` / `mirror`, then opens its own HTTPS
+connection to the original target. CONNECT targets matching no group stay opaque
+TCP tunnels.
+
+### 1. Generate a CA per group
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout -out mitm-ca.key
+openssl req -x509 -new -key mitm-ca.key -sha256 -days 3650 \
+  -subj "/CN=domain-forwarder MITM CA" \
+  -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign" \
+  -out mitm-ca.crt
+chmod 600 mitm-ca.key
+```
+
+The CA key signs short-lived (up to 7 days), per-host leaf certificates on
+demand; leaves are cached by host. Keep each key readable only by the proxy user
+and install the matching `.crt` on every client that should trust the
+interception.
+
+### 2. Configure groups
+
+```yaml
+mitm:
+  enabled: true
+  groups:
+    - name: internal
+      ca_cert_file: /etc/domain-forwarder/mitm-internal-ca.crt
+      ca_key_file: /etc/domain-forwarder/mitm-internal-ca.key
+      hosts:
+        - api.example.com
+        - "*.internal.example.com"
+    - name: all
+      ca_cert_file: /etc/domain-forwarder/mitm-ca.crt
+      ca_key_file: /etc/domain-forwarder/mitm-ca.key
+      hosts:
+        - "*"
+```
+
+- Groups are evaluated in configuration order; the first match wins.
+- `hosts` entries are `*` (every host), `*.example.com` (subdomains only, not
+  the bare domain), a bare host name, or an IP literal. Ports are ignored.
+- A `*` group makes every later group unreachable; startup logs a warning, as it
+  does for hosts listed in more than one group.
+- Non-TLS CONNECTs matched by a group (for example to port 80 or SSH) fall back
+  to a plain tunnel automatically.
+
+### 3. Trust the CA on clients
+
+```bash
+curl -x http://proxy:8080 https://api.example.com --cacert mitm-internal-ca.crt
+```
+
+Add the CA to the operating system or browser trust store for transparent use.
+Tools with their own trust stores (Go, Java, Node.js) need the CA configured
+there.
+
+### Limitations
+
+- The intercepted CONNECT itself must use HTTP/1.1. A matching CONNECT received
+  over proxy-side HTTP/2 returns 501; unmatched HTTP/2 CONNECT tunnels are
+  unaffected. Inside an intercepted tunnel, both HTTP/1.1 and HTTP/2 work.
+- Clients that pin certificates will reject the minted certificates.
+- Upstream client certificates (mTLS) are not forwarded; such hosts cannot be
+  intercepted.
+- Intercepted connections are not tracked by the main server's graceful
+  shutdown, the same as raw HTTP/1.1 CONNECT tunnels.
+- Decrypted request bodies pass through `mirror` when it is enabled.
 
 ## Manual Deployment
 
@@ -241,6 +317,10 @@ that point — usually the client hanging up mid-body — are covered by the
 summary line alone. Set `debug: true` to also log those late failures and the
 client-side local address.
 
+Intercepted CONNECTs print one summary line per decrypted request plus a
+`[MITM] source=... target=... group=... requested=N duration=...` line when the
+connection ends. Handshake and relay errors are logged only with `debug: true`.
+
 ## Testing Utilities
 
 `tools/request-printer` is a companion service that logs every incoming
@@ -274,8 +354,8 @@ sudo journalctl -u domain-forwarder -n 50 --no-pager
 ```
 
 Startup failures (missing/invalid config, a bad `addr`, negative durations,
-an invalid access-control entry, missing TLS files, a port already in use) are
-printed with a precise message. Run the binary manually to see it directly:
+an invalid access-control entry, missing TLS or mitm CA files, a port already in
+use) are printed with a precise message. Run the binary manually to see it directly:
 
 ```bash
 sudo /opt/domain-forwarder/domain-forwarder -c /etc/domain-forwarder/config.yaml

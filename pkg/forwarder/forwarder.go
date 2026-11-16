@@ -3,6 +3,7 @@ package forwarder
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +47,7 @@ type Config struct {
 	StripAcceptEncoding   bool          // drop the client's Accept-Encoding before forwarding (gateways that must not let the upstream compress)
 	DisableCompression    bool          // never negotiate compression with the upstream
 	ForceAttemptHTTP2     bool
+	TLSClientConfig       *tls.Config // client TLS settings for upstream HTTPS (nil uses system defaults)
 }
 
 // DefaultConfig returns the canonical engine defaults.
@@ -133,6 +135,7 @@ func (f *Forwarder) getHTTPClient() *http.Client {
 			ExpectContinueTimeout: f.config.ExpectContinueTimeout,
 			ResponseHeaderTimeout: f.config.ResponseHeaderTimeout,
 			ForceAttemptHTTP2:     f.config.ForceAttemptHTTP2,
+			TLSClientConfig:       f.config.TLSClientConfig,
 			// A compressing gateway buffers the SSE stream in the compressor,
 			// so events pile up there and reach the client in bursts seconds
 			// later. Identity responses are valid for every client.

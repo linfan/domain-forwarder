@@ -1,8 +1,11 @@
 // Package proxy implements the forward proxy handler: plain HTTP requests are
-// relayed through the forwarding engine, CONNECT requests get a raw TCP tunnel.
+// relayed through the forwarding engine, CONNECT requests get a raw TCP tunnel,
+// and CONNECT targets matching a mitm group are terminated locally so their
+// decrypted requests can be edited and re-originated.
 package proxy
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +18,7 @@ import (
 	"time"
 
 	"domain-forwarder/pkg/forwarder"
+	"domain-forwarder/pkg/mitm"
 )
 
 // AccessList holds the filter entries for one request attribute. A blacklist
@@ -35,12 +39,19 @@ type AccessControl struct {
 type Config struct {
 	Debug           bool
 	AddProxyHeaders bool
-	EditHeaders     map[string]string // Headers set on forwarded plain-HTTP requests; nil disables editing
+	EditHeaders     map[string]string // Headers set on forwarded requests; nil disables editing
 	Mirror          *Mirror           // Async shadow delivery; nil disables mirroring
+	MITM            *mitm.Config      // HTTPS interception groups; nil keeps CONNECT tunnels opaque
 	AccessControl   AccessControl
 	Auth            *Auth         // nil disables proxy authentication
 	DialTimeout     time.Duration // CONNECT tunnel dial timeout
 	DialKeepAlive   time.Duration // CONNECT tunnel TCP keep-alive interval
+
+	TLSHandshakeTimeout time.Duration
+	ReadHeaderTimeout   time.Duration
+	IdleTimeout         time.Duration
+	MaxHeaderBytes      int
+	TLSClientConfig     *tls.Config
 }
 
 // Server is the forward proxy HTTP handler.
@@ -125,15 +136,21 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Host = r.Host
 	}
 
+	s.forward(w, r, r.URL.String(), r.URL.Scheme)
+}
+
+// forward applies the configured header edits and mirror snapshot, then relays
+// r to target. scheme is the scheme the client used towards the proxy and only
+// feeds X-Forwarded-Proto.
+func (s *Server) forward(w http.ResponseWriter, r *http.Request, target, scheme string) {
 	if s.config.AddProxyHeaders {
-		forwarder.AddForwardedHeaders(r, r.URL.Scheme)
+		forwarder.AddForwardedHeaders(r, scheme)
 	}
 	applyRequestEdits(r, s.config.EditHeaders)
 	if s.config.Mirror != nil {
 		s.config.Mirror.prepare(r)
 	}
 
-	target := r.URL.String()
 	result, err := s.engine.ForwardRequest(w, r, target, nil)
 	logSummary(r, target, result)
 	if err != nil {
@@ -151,11 +168,18 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleConnect establishes a tunnel for HTTPS (CONNECT) requests. HTTP/1.1
-// clients get a hijacked raw TCP tunnel; HTTP/2 clients tunnel data inside the
-// CONNECT stream, since HTTP/2 supports neither connection hijacking nor
-// per-connection takeover.
+// handleConnect terminates matching HTTP/1.1 CONNECTs for HTTPS interception;
+// other requests use a hijacked HTTP/1.1 tunnel or an HTTP/2 CONNECT stream.
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
+	if group, ok := s.config.MITM.Match(r.Host); ok {
+		if r.ProtoMajor >= 2 {
+			http.Error(w, "Not Implemented: HTTPS interception over HTTP/2 CONNECT is not supported", http.StatusNotImplemented)
+			return
+		}
+		s.handleMITM(w, r, group)
+		return
+	}
+
 	start := time.Now()
 
 	targetConn, err := (&net.Dialer{
@@ -188,7 +212,7 @@ func (s *Server) tunnelH1(w http.ResponseWriter, r *http.Request, targetConn net
 		return
 	}
 
-	clientConn, _, err := hijacker.Hijack()
+	clientConn, brw, err := hijacker.Hijack()
 	if err != nil {
 		log.Printf("Error hijacking connection: %v", err)
 		http.Error(w, "Hijack failed: "+err.Error(), http.StatusInternalServerError)
@@ -207,6 +231,15 @@ func (s *Server) tunnelH1(w http.ResponseWriter, r *http.Request, targetConn net
 		return
 	}
 
+	// brw.Reader may already hold tunnel bytes that arrived with the CONNECT
+	// request, so the client-to-target direction reads from it.
+	return s.relay(start, clientConn, brw.Reader, targetConn)
+}
+
+// relay copies bytes in both directions between the client and target.
+// clientReader may be a buffered view of clientConn that already holds bytes
+// received with the CONNECT request.
+func (s *Server) relay(start time.Time, clientConn net.Conn, clientReader io.Reader, targetConn net.Conn) (c2t, t2c copyResult) {
 	// Bidirectional copy reusing the engine's buffer pool. Per-direction end
 	// times are recorded so the log shows which side stopped first: a nil error
 	// means EOF (the peer half-closed), an error means the copy was aborted.
@@ -218,7 +251,7 @@ func (s *Server) tunnelH1(w http.ResponseWriter, r *http.Request, targetConn net
 		defer wg.Done()
 		buf := buffers.Get()
 		defer buffers.Put(buf)
-		c2t.bytes, c2t.err = io.CopyBuffer(writerOnly{targetConn}, readerOnly{clientConn}, buf)
+		c2t.bytes, c2t.err = io.CopyBuffer(writerOnly{targetConn}, readerOnly{clientReader}, buf)
 		c2t.end = time.Since(start)
 		if tcpConn, ok := targetConn.(*net.TCPConn); ok {
 			_ = tcpConn.CloseWrite()
