@@ -131,7 +131,7 @@ func main() {
 			if name == "" {
 				name = fmt.Sprintf("group-%d", i+1)
 			}
-			authority, err := mitm.NewAuthority(groupConfig.CACertFile, groupConfig.CAKeyFile)
+			authority, err := mitm.NewAuthority(groupConfig.CACertFile, groupConfig.CAKeyFile, cfg.MITM.MaxCachedHosts)
 			if err != nil {
 				log.Fatalf("Invalid mitm.groups[%d] (%s): %v", i, name, err)
 			}

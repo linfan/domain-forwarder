@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"os"
@@ -17,7 +18,7 @@ import (
 
 func TestCertificateForDomain(t *testing.T) {
 	certFile, keyFile, caCert := newTestCA(t)
-	a, err := NewAuthority(certFile, keyFile)
+	a, err := NewAuthority(certFile, keyFile, 0)
 	if err != nil {
 		t.Fatalf("NewAuthority: %v", err)
 	}
@@ -45,7 +46,7 @@ func TestCertificateForDomain(t *testing.T) {
 
 func TestCertificateForIP(t *testing.T) {
 	certFile, keyFile, caCert := newTestCA(t)
-	a, err := NewAuthority(certFile, keyFile)
+	a, err := NewAuthority(certFile, keyFile, 0)
 	if err != nil {
 		t.Fatalf("NewAuthority: %v", err)
 	}
@@ -67,7 +68,7 @@ func TestCertificateForIP(t *testing.T) {
 
 func TestCertificateCache(t *testing.T) {
 	certFile, keyFile, _ := newTestCA(t)
-	a, err := NewAuthority(certFile, keyFile)
+	a, err := NewAuthority(certFile, keyFile, 0)
 	if err != nil {
 		t.Fatalf("NewAuthority: %v", err)
 	}
@@ -85,20 +86,114 @@ func TestCertificateCache(t *testing.T) {
 	}
 }
 
+func TestRenewAtMargin(t *testing.T) {
+	now := time.Now()
+
+	// A full seven-day leaf is replaced a day before it expires.
+	long := now.Add(leafValidity)
+	if got := renewAt(now, long); !got.Equal(long.Add(-leafRenewWindow)) {
+		t.Errorf("renewAt(7d) = %v, want %v", got, long.Add(-leafRenewWindow))
+	}
+
+	// A leaf clamped by a short-lived CA keeps two thirds of its lifetime, so
+	// it is not re-minted on every request.
+	short := now.Add(90 * time.Minute)
+	if got := renewAt(now, short); !got.Equal(short.Add(-30 * time.Minute)) {
+		t.Errorf("renewAt(90m) = %v, want %v", got, short.Add(-30*time.Minute))
+	}
+}
+
+func TestCertificateReMintedAfterRenewDeadline(t *testing.T) {
+	certFile, keyFile, caCert := newTestCA(t)
+	a, err := NewAuthority(certFile, keyFile, 0)
+	if err != nil {
+		t.Fatalf("NewAuthority: %v", err)
+	}
+
+	first, err := a.CertificateFor("renew.example.com")
+	if err != nil {
+		t.Fatalf("CertificateFor: %v", err)
+	}
+
+	// Pretend the renew deadline passed: an expired leaf must never be handed
+	// out again, or a client would reject it on a long-running tunnel.
+	a.mu.Lock()
+	a.cache["renew.example.com"].renewAt = time.Now().Add(-time.Second)
+	a.mu.Unlock()
+
+	second, err := a.CertificateFor("renew.example.com")
+	if err != nil {
+		t.Fatalf("renew CertificateFor: %v", err)
+	}
+	if second == first {
+		t.Fatal("expected a re-minted leaf once the renew deadline passed")
+	}
+	if second.Leaf.SerialNumber.Cmp(first.Leaf.SerialNumber) == 0 {
+		t.Fatal("the renewed leaf is the same certificate, not a newly minted one")
+	}
+
+	third, err := a.CertificateFor("renew.example.com")
+	if err != nil {
+		t.Fatalf("third CertificateFor: %v", err)
+	}
+	if third != second {
+		t.Fatal("the renewed leaf must be cached again")
+	}
+
+	roots := x509.NewCertPool()
+	roots.AddCert(caCert)
+	if _, err := third.Leaf.Verify(x509.VerifyOptions{Roots: roots}); err != nil {
+		t.Fatalf("verify renewed leaf: %v", err)
+	}
+}
+
+func TestCacheHonoursMaxCachedHosts(t *testing.T) {
+	certFile, keyFile, caCert := newTestCA(t)
+	const limit = 4
+	a, err := NewAuthority(certFile, keyFile, limit)
+	if err != nil {
+		t.Fatalf("NewAuthority: %v", err)
+	}
+
+	for i := 0; i < 3*limit; i++ {
+		if _, err := a.CertificateFor(fmt.Sprintf("host%d.example.com", i)); err != nil {
+			t.Fatalf("CertificateFor host %d: %v", i, err)
+		}
+	}
+
+	a.mu.Lock()
+	size := len(a.cache)
+	a.mu.Unlock()
+	if size > limit {
+		t.Fatalf("cache holds %d hosts, limit is %d", size, limit)
+	}
+
+	// Eviction may only drop a leaf, never break the host it belongs to.
+	leaf, err := a.CertificateFor("host0.example.com")
+	if err != nil {
+		t.Fatalf("CertificateFor after eviction: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(caCert)
+	if _, err := leaf.Leaf.Verify(x509.VerifyOptions{Roots: roots}); err != nil {
+		t.Fatalf("verify evicted-and-reminted leaf: %v", err)
+	}
+}
+
 func TestNewAuthorityRejectsNonCA(t *testing.T) {
 	dir := t.TempDir()
 	certFile := filepath.Join(dir, "leaf.crt")
 	keyFile := filepath.Join(dir, "leaf.key")
 	writeSelfSigned(t, certFile, keyFile, false)
 
-	if _, err := NewAuthority(certFile, keyFile); err == nil {
+	if _, err := NewAuthority(certFile, keyFile, 0); err == nil {
 		t.Fatal("expected a non-CA certificate to be rejected")
 	}
 }
 
 func TestGroupMatch(t *testing.T) {
 	certFile, keyFile, _ := newTestCA(t)
-	a, err := NewAuthority(certFile, keyFile)
+	a, err := NewAuthority(certFile, keyFile, 0)
 	if err != nil {
 		t.Fatalf("NewAuthority: %v", err)
 	}
@@ -135,7 +230,7 @@ func TestGroupMatch(t *testing.T) {
 
 func TestConfigMatchOrder(t *testing.T) {
 	certFile, keyFile, _ := newTestCA(t)
-	a, err := NewAuthority(certFile, keyFile)
+	a, err := NewAuthority(certFile, keyFile, 0)
 	if err != nil {
 		t.Fatalf("NewAuthority: %v", err)
 	}

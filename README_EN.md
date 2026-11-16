@@ -95,9 +95,10 @@ The config is grouped into these sections:
   `auth` (HTTP Basic authentication for proxy clients; single user, password
   plaintext or bcrypt hash), `edit` (adds headers before forwarding),
   `mirror` (asynchronous traffic mirroring),
-  `mitm` (HTTPS interception groups and host rules)
-- `forward`: forwarding-engine parameters (pool sizes, dial/TLS/header
-  timeouts, `request_timeout`, `stream_idle_timeout`, `response_body_timeout`,
+  `mitm` (HTTPS interception groups, host rules and the leaf cache limit)
+- `forward`: forwarding-engine parameters (pool sizes, the
+  `upstream_ca_file` trust bundle, dial/TLS/header timeouts,
+  `request_timeout`, `stream_idle_timeout`, `response_body_timeout`,
   `streaming_flush`, `disable_compression`, `force_attempt_http2`,
   `buffer_size`)
 - `server`: HTTP server settings for the proxy listener

@@ -170,7 +170,7 @@ func TestMITMBypassUnmatchedHost(t *testing.T) {
 
 func TestMITMRejectsProxyHTTP2CONNECT(t *testing.T) {
 	_, certFile, keyFile := newTestCACertificate(t)
-	authority, err := mitm.NewAuthority(certFile, keyFile)
+	authority, err := mitm.NewAuthority(certFile, keyFile, 0)
 	if err != nil {
 		t.Fatalf("NewAuthority: %v", err)
 	}
@@ -425,7 +425,7 @@ func newTestUpstream(t *testing.T, http2 bool) (*httptest.Server, <-chan recorde
 func newTestMITMProxy(t *testing.T, hosts []string, edits map[string]string, mirror *Mirror, upstreamRoots *x509.CertPool) (*httptest.Server, *x509.CertPool) {
 	t.Helper()
 	caCert, caCertFile, caKeyFile := newTestCACertificate(t)
-	authority, err := mitm.NewAuthority(caCertFile, caKeyFile)
+	authority, err := mitm.NewAuthority(caCertFile, caKeyFile, 0)
 	if err != nil {
 		t.Fatalf("NewAuthority: %v", err)
 	}

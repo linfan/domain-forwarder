@@ -93,11 +93,11 @@ export https_proxy=http://localhost:8080
   `access_control`（按来源 IP 与目标域名配置黑名单/白名单）、
   `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）、
   `edit`（转发前为请求追加 Header）、`mirror`（异步流量镜像）、
-  `mitm`（HTTPS 拦截证书组与域名规则）
-- `forward`：转发引擎参数（连接池容量、连接/TLS/响应头超时、
-  `request_timeout`、`stream_idle_timeout`、`response_body_timeout`、
-  `streaming_flush`、`disable_compression`、`force_attempt_http2`、
-  `buffer_size`）
+  `mitm`（HTTPS 拦截证书组、域名规则与叶子缓存上限）
+- `forward`：转发引擎参数（连接池容量、上游信任库 `upstream_ca_file`、
+  连接/TLS/响应头超时、`request_timeout`、`stream_idle_timeout`、
+  `response_body_timeout`、`streaming_flush`、`disable_compression`、
+  `force_attempt_http2`、`buffer_size`）
 - `server`：代理监听地址对应的 HTTP 服务器参数
 - `log`：可选的文件日志与按大小滚动（未配置时输出到 stderr）
 - `tls`：为代理自身的监听端口启用 TLS（支持 Let's Encrypt 的 `fullchain.pem`）

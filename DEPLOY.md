@@ -157,8 +157,10 @@ chmod 600 mitm-ca.key
 ```
 
 The CA key signs short-lived (up to 7 days), per-host leaf certificates on
-demand; leaves are cached by host. Keep each key readable only by the proxy user
-and install the matching `.crt` on every client that should trust the
+demand; leaves are cached by host and re-minted before they expire, so the proxy
+can run for months without presenting a certificate a client rejects. The cache
+is bounded by `mitm.max_cached_hosts`. Keep each key readable only by the proxy
+user and install the matching `.crt` on every client that should trust the
 interception.
 
 ### 2. Configure groups

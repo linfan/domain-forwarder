@@ -18,9 +18,20 @@ import (
 	"time"
 )
 
-// leafValidity bounds how long a minted leaf stays valid. Short-lived leaves are
-// re-minted automatically because only their host is cached.
+// leafValidity bounds how long a minted leaf stays valid. Cached leaves are
+// replaced before they expire (see renewAt), so a proxy that runs for weeks
+// never presents a certificate a client rejects.
 const leafValidity = 7 * 24 * time.Hour
+
+// leafRenewWindow caps how early a cached leaf is re-minted. The actual margin
+// is a third of the leaf's lifetime (see renewAt), so a CA with a short validity
+// period does not turn every request into a signing operation.
+const leafRenewWindow = 24 * time.Hour
+
+// DefaultMaxCachedHosts is the number of leaves one Authority caches at most.
+// A cached leaf costs tens of kilobytes, so an unbounded per-host cache grows
+// with the traffic mix instead of staying proportional to the live tunnels.
+const DefaultMaxCachedHosts = 4096
 
 // Authority issues leaf certificates for individual hosts, signed by one CA and
 // cached per host.
@@ -29,12 +40,21 @@ type Authority struct {
 	chain  [][]byte
 	signer crypto.Signer
 
-	mu    sync.Mutex
-	cache map[string]*tls.Certificate
+	maxCachedHosts int
+	mu             sync.Mutex
+	cache          map[string]*cachedLeaf
+}
+
+// cachedLeaf is one minted leaf plus the moment it must be replaced.
+type cachedLeaf struct {
+	cert    *tls.Certificate
+	renewAt time.Time
 }
 
 // NewAuthority loads the CA certificate/key pair used to sign minted leaves.
-func NewAuthority(certFile, keyFile string) (*Authority, error) {
+// maxCachedHosts bounds how many leaves are kept; 0 or less disables the
+// limit, which is what an unlimited cache means in the configuration.
+func NewAuthority(certFile, keyFile string, maxCachedHosts int) (*Authority, error) {
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, fmt.Errorf("load CA certificate/key: %w", err)
@@ -57,26 +77,30 @@ func NewAuthority(certFile, keyFile string) (*Authority, error) {
 		return nil, fmt.Errorf("CA key %s cannot sign certificates", keyFile)
 	}
 	return &Authority{
-		cert:   cert,
-		chain:  pair.Certificate,
-		signer: signer,
-		cache:  make(map[string]*tls.Certificate),
+		cert:           cert,
+		chain:          pair.Certificate,
+		signer:         signer,
+		maxCachedHosts: maxCachedHosts,
+		cache:          make(map[string]*cachedLeaf),
 	}, nil
 }
 
 // CertificateFor returns a leaf certificate for host, minting and caching it on
-// first use. host may be a DNS name or an IP literal.
+// first use. host may be a DNS name or an IP literal. A cached leaf is reused
+// until its renewAt deadline passes, so a host keeps its certificate while a
+// long-running proxy never hands out an expiring one.
 func (a *Authority) CertificateFor(host string) (*tls.Certificate, error) {
 	host = normalizeHost(host)
 	if host == "" {
 		return nil, fmt.Errorf("empty host")
 	}
 
+	now := time.Now()
 	a.mu.Lock()
 	cached := a.cache[host]
 	a.mu.Unlock()
-	if cached != nil {
-		return cached, nil
+	if cached != nil && cached.renewAt.After(now) {
+		return cached.cert, nil
 	}
 
 	cert, err := a.issue(host)
@@ -86,11 +110,39 @@ func (a *Authority) CertificateFor(host string) (*tls.Certificate, error) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if existing := a.cache[host]; existing != nil {
-		return existing, nil
+	// Another goroutine may have minted the same host while the lock was dropped.
+	if existing := a.cache[host]; existing != nil && existing.renewAt.After(time.Now()) {
+		return existing.cert, nil
 	}
-	a.cache[host] = cert
+	a.store(host, cert)
 	return cert, nil
+}
+
+// store caches one leaf and keeps the cache within maxCachedHosts.
+func (a *Authority) store(host string, cert *tls.Certificate) {
+	a.cache[host] = &cachedLeaf{cert: cert, renewAt: renewAt(cert.Leaf.NotBefore, cert.Leaf.NotAfter)}
+	if a.maxCachedHosts <= 0 || len(a.cache) <= a.maxCachedHosts {
+		return
+	}
+	// Over the limit, drop one entry. Map iteration order is randomized, so this
+	// is an O(1) approximate eviction: the evicted host re-mints on its next use,
+	// which is also what an expired leaf would have required.
+	for name := range a.cache {
+		delete(a.cache, name)
+		break
+	}
+}
+
+// renewAt is when a leaf minted to be valid from notBefore until notAfter has
+// lost enough of its lifetime to be worth replacing. The margin is a third of
+// the lifetime, never more than leafRenewWindow: re-minting before expiry keeps
+// tunnels that outlive a certificate from ever seeing it expire.
+func renewAt(notBefore, notAfter time.Time) time.Time {
+	margin := notAfter.Sub(notBefore) / 3
+	if margin > leafRenewWindow {
+		margin = leafRenewWindow
+	}
+	return notAfter.Add(-margin)
 }
 
 func (a *Authority) issue(host string) (*tls.Certificate, error) {

@@ -54,8 +54,12 @@ type MITMGroupConfig struct {
 // group are decrypted; everything else stays an opaque TCP tunnel. Groups are
 // evaluated in order and the first match wins.
 type MITMConfig struct {
-	Enabled bool              `yaml:"enabled"`
-	Groups  []MITMGroupConfig `yaml:"groups"`
+	Enabled bool `yaml:"enabled"`
+	// MaxCachedHosts bounds the minted leaves kept per CA. A cached leaf costs
+	// tens of kilobytes, so without a limit the cache grows with every distinct
+	// intercepted host. 0 disables the limit.
+	MaxCachedHosts int               `yaml:"max_cached_hosts"`
+	Groups         []MITMGroupConfig `yaml:"groups"`
 }
 
 // MirrorConfig configures best-effort traffic mirroring: every forwarded proxy
@@ -270,6 +274,7 @@ func defaultConfig() *Config {
 	return &Config{
 		Addr:    ":8080",
 		Forward: defaultForwardConfig(),
+		MITM:    MITMConfig{MaxCachedHosts: mitm.DefaultMaxCachedHosts},
 		Server: ServerConfig{
 			ReadHeaderTimeout: 10 * time.Second,
 			IdleTimeout:       120 * time.Second,
@@ -426,6 +431,9 @@ func (mc *MirrorConfig) Validate() error {
 func (mc *MITMConfig) Validate() error {
 	if !mc.Enabled {
 		return nil
+	}
+	if mc.MaxCachedHosts < 0 {
+		return fmt.Errorf("mitm.max_cached_hosts must not be negative, got %d", mc.MaxCachedHosts)
 	}
 	if len(mc.Groups) == 0 {
 		return fmt.Errorf("mitm.groups must contain at least one group when mitm is enabled")
