@@ -263,6 +263,103 @@ func TestValidateHostPattern(t *testing.T) {
 	}
 }
 
+func TestTunnelExclusionMatching(t *testing.T) {
+	cases := []struct {
+		entries   []string
+		authority string
+		want      string // "" means the list does not cover the CONNECT
+	}{
+		{[]string{"*:25"}, "mail.example.com:25", "*:25"},
+		{[]string{"*:25"}, "MAIL.example.com.:25", "*:25"},
+		{[]string{"*:25"}, "mail.example.com:443", ""},
+		{[]string{"*:25"}, "user:pw@mail.example.com:25", "*:25"},
+		// A portless authority carries no port, so an entry that names one must
+		// not claim it and interception stays strict.
+		{[]string{"*:25"}, "mail.example.com", ""},
+		{[]string{"*.example.com:25"}, "a.example.com:25", "*.example.com:25"},
+		{[]string{"*.example.com:25"}, "example.com:25", ""},
+		{[]string{"legacy.example.com"}, "legacy.example.com:8443", "legacy.example.com"},
+		{[]string{"legacy.example.com"}, "legacy.example.com", "legacy.example.com"},
+		{[]string{"10.0.0.5:143"}, "10.0.0.5:143", "10.0.0.5:143"},
+		{[]string{"10.0.0.5:143"}, "10.0.0.5:993", ""},
+		{[]string{"[::1]:143"}, "[::1]:143", "[::1]:143"},
+		{[]string{"::1"}, "[::1]:143", "::1"},
+		// Ports compare numerically, so a zero-padded entry still matches.
+		{[]string{"*:025"}, "mail.example.com:25", "*:025"},
+		// The first matching entry is the one reported.
+		{[]string{"a.example.com:25", "*:25"}, "a.example.com:25", "a.example.com:25"},
+	}
+	for _, tc := range cases {
+		tunnel, err := NewTunnelExclusion(tc.entries)
+		if err != nil {
+			t.Fatalf("NewTunnelExclusion(%q): %v", tc.entries, err)
+		}
+		if got := tunnel.EntryFor(tc.authority); got != tc.want {
+			t.Errorf("entries %q EntryFor(%q) = %q, want %q", tc.entries, tc.authority, got, tc.want)
+		}
+	}
+}
+
+func TestTunnelExclusionRejectsBadEntries(t *testing.T) {
+	invalid := []string{
+		"", "*:*", "example.com:0", "example.com:65536", "example.com:https",
+		"example.com:", "https://example.com:25", "*.example.com:*", "a b:25",
+		"example.com:25:26", "*example.com:25", "a/b:25",
+	}
+	for _, entry := range invalid {
+		if err := ValidateConnectEntry(entry); err == nil {
+			t.Errorf("ValidateConnectEntry(%q) = nil, want an error", entry)
+		}
+	}
+
+	valid := []string{
+		"*", "*.example.com", "example.com", "127.0.0.1", "::1", "[::1]",
+		"*:25", "*.example.com:25", "example.com:443", "10.0.0.5:143", "[::1]:143", "*:65535",
+	}
+	for _, entry := range valid {
+		if err := ValidateConnectEntry(entry); err != nil {
+			t.Errorf("ValidateConnectEntry(%q) = %v, want nil", entry, err)
+		}
+	}
+}
+
+// TestExcludedCoversGroupMatchedAuthority pins the contract handleConnect
+// relies on: a group can cover a host while an exclusion keeps its CONNECT raw.
+func TestExcludedCoversGroupMatchedAuthority(t *testing.T) {
+	certFile, keyFile, _ := newTestCA(t)
+	a, err := NewAuthority(certFile, keyFile, 0)
+	if err != nil {
+		t.Fatalf("NewAuthority: %v", err)
+	}
+	catchAll, err := NewGroup("all", []string{"*"}, a)
+	if err != nil {
+		t.Fatalf("NewGroup: %v", err)
+	}
+	tunnel, err := NewTunnelExclusion([]string{"*:25"})
+	if err != nil {
+		t.Fatalf("NewTunnelExclusion: %v", err)
+	}
+	cfg := &Config{Groups: []*Group{catchAll}, Tunnel: tunnel}
+
+	if _, ok := cfg.Match("mail.example.com:25"); !ok {
+		t.Error("the catch-all group must still cover mail.example.com:25")
+	}
+	if got := cfg.Excluded("mail.example.com:25"); got != "*:25" {
+		t.Errorf("Excluded = %q, want *:25", got)
+	}
+	if got := cfg.Excluded("api.example.com:443"); got != "" {
+		t.Errorf("Excluded = %q, want empty so the host is intercepted", got)
+	}
+
+	var absent *Config
+	if got := absent.Excluded("mail.example.com:25"); got != "" {
+		t.Errorf("(*Config)(nil).Excluded = %q, want empty", got)
+	}
+	if got := (&Config{}).Excluded("mail.example.com:25"); got != "" {
+		t.Errorf("Config without exclusions Excluded = %q, want empty", got)
+	}
+}
+
 func newTestCA(t *testing.T) (certFile, keyFile string, cert *x509.Certificate) {
 	t.Helper()
 	dir := t.TempDir()

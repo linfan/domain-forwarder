@@ -52,9 +52,16 @@ type MITMGroupConfig struct {
 
 // MITMConfig configures HTTPS interception. Only CONNECT targets matching a
 // group are decrypted; everything else stays an opaque TCP tunnel. Groups are
-// evaluated in order and the first match wins.
+// evaluated in order and the first match wins, but TunnelConnect entries
+// outrank every group.
 type MITMConfig struct {
 	Enabled bool `yaml:"enabled"`
+	// TunnelConnect lists CONNECT authorities that must stay opaque tunnels even
+	// when a group covers their host: a host pattern ("*", "*.example.com", a bare
+	// host, an IP literal) with an optional ":port". An entry without a port covers
+	// every port of that host. Server-speaks-first protocols (SMTP, FTP, IMAP) send
+	// no ClientHello to sniff, so their port belongs here rather than in a group.
+	TunnelConnect []string `yaml:"tunnel_connect"`
 	// MaxCachedHosts bounds the minted leaves kept per CA. A cached leaf costs
 	// tens of kilobytes, so without a limit the cache grows with every distinct
 	// intercepted host. 0 disables the limit.
@@ -434,6 +441,11 @@ func (mc *MITMConfig) Validate() error {
 	}
 	if mc.MaxCachedHosts < 0 {
 		return fmt.Errorf("mitm.max_cached_hosts must not be negative, got %d", mc.MaxCachedHosts)
+	}
+	for _, entry := range mc.TunnelConnect {
+		if err := mitm.ValidateConnectEntry(entry); err != nil {
+			return fmt.Errorf("mitm.tunnel_connect: %w", err)
+		}
 	}
 	if len(mc.Groups) == 0 {
 		return fmt.Errorf("mitm.groups must contain at least one group when mitm is enabled")

@@ -304,7 +304,9 @@ func (s *Server) dialAndRelay(r *http.Request, start time.Time, clientConn net.C
 		return
 	}
 	c2t, t2c := s.relay(start, clientConn, clientReader, targetConn)
-	s.logTunnel(r, targetConn, c2t, t2c, time.Since(start))
+	// No tunnel_connect exclusion can apply here: this tunnel is already inside
+	// an intercepted CONNECT.
+	s.logTunnel(r, targetConn, c2t, t2c, time.Since(start), "")
 }
 
 // upstreamAddress is where a CONNECT authority points. A bare host means the TLS

@@ -145,6 +145,17 @@ func main() {
 		for _, group := range mitmConfig.Groups {
 			log.Printf("HTTPS interception group %q: %s", group.Name, strings.Join(group.Hosts(), ", "))
 		}
+		if len(cfg.MITM.TunnelConnect) > 0 {
+			tunnel, err := mitm.NewTunnelExclusion(cfg.MITM.TunnelConnect)
+			if err != nil {
+				log.Fatalf("Invalid mitm.tunnel_connect: %v", err)
+			}
+			mitmConfig.Tunnel = tunnel
+			// Reported last because the list outranks every group: these targets are
+			// never decrypted, whatever the groups say.
+			log.Printf("HTTPS interception leaves opaque tunnels for: %s",
+				strings.Join(cfg.MITM.TunnelConnect, ", "))
+		}
 	}
 
 	handler := proxy.New(engine, proxy.Config{

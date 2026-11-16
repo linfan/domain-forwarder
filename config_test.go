@@ -12,6 +12,46 @@ import (
 	"testing"
 )
 
+func TestMITMTunnelConnectValidation(t *testing.T) {
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "ca.crt")
+	keyFile := filepath.Join(dir, "ca.key")
+	for _, name := range []string{certFile, keyFile} {
+		if err := os.WriteFile(name, []byte("placeholder"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	mc := MITMConfig{
+		Enabled: true,
+		Groups: []MITMGroupConfig{{
+			Name:       "all",
+			CACertFile: certFile,
+			CAKeyFile:  keyFile,
+			Hosts:      []string{"*"},
+		}},
+	}
+	if err := mc.Validate(); err != nil {
+		t.Fatalf("mitm without exclusions must validate: %v", err)
+	}
+
+	mc.TunnelConnect = []string{"*:25", "*.example.com:25", "[::1]:143", "legacy.example.com"}
+	if err := mc.Validate(); err != nil {
+		t.Fatalf("valid tunnel_connect entries must validate: %v", err)
+	}
+
+	for _, bad := range []string{"*:https", "*:*", "example.com:0", "https://example.com:25", "example.com:"} {
+		mc.TunnelConnect = []string{bad}
+		err := mc.Validate()
+		if err == nil {
+			t.Fatalf("Validate accepted mitm.tunnel_connect %q", bad)
+		}
+		if !strings.Contains(err.Error(), "mitm.tunnel_connect") {
+			t.Errorf("error for %q = %v, want it to name mitm.tunnel_connect", bad, err)
+		}
+	}
+}
+
 func TestUpstreamTLSConfigDisabledByDefault(t *testing.T) {
 	fc := defaultForwardConfig()
 	config, err := fc.UpstreamTLSConfig()

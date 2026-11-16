@@ -10,9 +10,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -236,23 +238,143 @@ func (g *Group) Match(hostport string) bool {
 		return false
 	}
 	for _, p := range g.patterns {
-		switch {
-		case p.matchAll:
-			return true
-		case p.suffix != "":
-			if strings.HasSuffix(host, p.suffix) && len(host) > len(p.suffix) {
-				return true
-			}
-		case p.exact == host:
+		if p.match(host) {
 			return true
 		}
 	}
 	return false
 }
 
-// Config is an ordered list of interception groups.
+// match reports whether host, already normalized, is covered by the pattern.
+func (p pattern) match(host string) bool {
+	switch {
+	case p.matchAll:
+		return true
+	case p.suffix != "":
+		return strings.HasSuffix(host, p.suffix) && len(host) > len(p.suffix)
+	default:
+		return p.exact == host
+	}
+}
+
+// TunnelExclusion is the mitm.tunnel_connect list: CONNECT authorities that stay
+// opaque tunnels even though an interception group covers their host. A
+// server-speaks-first protocol (SMTP, FTP, IMAP) never sends a ClientHello, so
+// there is nothing to sniff on its port; carving it out by host and port keeps
+// decryption strict everywhere else instead of depending on client timing.
+type TunnelExclusion struct {
+	rules []connectRule
+}
+
+// connectRule is one listed entry: a host pattern and optionally the CONNECT
+// port it applies to.
+type connectRule struct {
+	entry string // as configured, so a tunnel can report what excluded it
+	host  pattern
+	port  string // "" matches every port
+}
+
+// NewTunnelExclusion builds the list from entries such as "*:25",
+// "*.example.com:25", "10.0.0.5:143" or "legacy.example.com", which covers every
+// port of that host.
+func NewTunnelExclusion(entries []string) (*TunnelExclusion, error) {
+	t := &TunnelExclusion{}
+	for _, entry := range entries {
+		rule, err := parseConnectEntry(entry)
+		if err != nil {
+			return nil, err
+		}
+		t.rules = append(t.rules, rule)
+	}
+	return t, nil
+}
+
+// EntryFor returns the first entry covering authority, or "" when none does.
+func (t *TunnelExclusion) EntryFor(authority string) string {
+	if t == nil {
+		return ""
+	}
+	host, port := authorityHostPort(authority)
+	if host == "" {
+		return ""
+	}
+	for _, rule := range t.rules {
+		if rule.port != "" && rule.port != port {
+			continue
+		}
+		if rule.host.match(host) {
+			return rule.entry
+		}
+	}
+	return ""
+}
+
+func parseConnectEntry(entry string) (connectRule, error) {
+	if entry == "" {
+		return connectRule{}, errors.New("entry must not be empty")
+	}
+	hostPart, portPart := entry, ""
+	// SplitHostPort fails for a bare host and for an unbracketed IPv6 literal,
+	// and both of those mean "every port".
+	if host, port, err := net.SplitHostPort(entry); err == nil {
+		if port == "" {
+			return connectRule{}, fmt.Errorf("invalid entry %q: nothing follows the colon", entry)
+		}
+		hostPart, portPart = host, port
+	}
+	if portPart != "" {
+		number, err := strconv.Atoi(portPart)
+		if err != nil || number < 1 || number > 65535 {
+			return connectRule{}, fmt.Errorf("invalid entry %q: port must be a number between 1 and 65535", entry)
+		}
+		portPart = strconv.Itoa(number)
+	}
+	host, err := parsePattern(hostPart)
+	if err != nil {
+		return connectRule{}, fmt.Errorf("invalid entry %q: %w", entry, err)
+	}
+	return connectRule{entry: entry, host: host, port: portPart}, nil
+}
+
+// authorityHostPort splits a CONNECT authority into its normalized host and
+// port. A missing or unparsable port yields "", so an entry that names a port
+// never matches an authority that does not carry one.
+func authorityHostPort(authority string) (host, port string) {
+	if i := strings.LastIndexByte(authority, '@'); i >= 0 {
+		authority = authority[i+1:]
+	}
+	hostPart, portPart, err := net.SplitHostPort(authority)
+	if err != nil {
+		return normalizeHost(authority), ""
+	}
+	number, err := strconv.Atoi(portPart)
+	if err != nil || number < 1 || number > 65535 {
+		return normalizeHost(hostPart), ""
+	}
+	return normalizeHost(hostPart), strconv.Itoa(number)
+}
+
+// ValidateConnectEntry checks one mitm.tunnel_connect entry: a host pattern with
+// an optional ":port".
+func ValidateConnectEntry(entry string) error {
+	_, err := parseConnectEntry(entry)
+	return err
+}
+
+// Config is an ordered list of interception groups plus the tunnel_connect
+// exclusions that override them.
 type Config struct {
 	Groups []*Group
+	Tunnel *TunnelExclusion
+}
+
+// Excluded returns the tunnel_connect entry that keeps authority an opaque
+// tunnel, "" when nothing was carved out for it.
+func (c *Config) Excluded(authority string) string {
+	if c == nil {
+		return ""
+	}
+	return c.Tunnel.EntryFor(authority)
 }
 
 // Match returns the first group covering hostport.

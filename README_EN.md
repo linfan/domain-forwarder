@@ -95,7 +95,8 @@ The config is grouped into these sections:
   `auth` (HTTP Basic authentication for proxy clients; single user, password
   plaintext or bcrypt hash), `edit` (adds headers before forwarding),
   `mirror` (asynchronous traffic mirroring),
-  `mitm` (HTTPS interception groups, host rules and the leaf cache limit)
+  `mitm` (HTTPS interception groups, host rules, the leaf cache limit and the
+  tunnel_connect exclusions)
 - `forward`: forwarding-engine parameters (pool sizes, the
   `upstream_ca_file` trust bundle, dial/TLS/header timeouts,
   `request_timeout`, `stream_idle_timeout`, `response_body_timeout`,
@@ -130,7 +131,10 @@ Field-by-field defaults, validation rules and tuning advice live in
   requests run through `add_proxy_headers`, `edit` and `mirror` before being
   re-originated over HTTPS to the original target. Groups are matched in order;
   `hosts` accepts exact hosts, `*.example.com` (subdomains only) and `*` (every
-  host). Unmatched CONNECTs stay opaque tunnels. Clients must trust the group's
+  host). Unmatched CONNECTs stay opaque tunnels, as do CONNECTs that a group
+  covers but `mitm.tunnel_connect` lists — the exit for server-speaks-first
+  protocols (SMTP, IMAP, FTP), which send no ClientHello to intercept, and the
+  tunnels it keeps raw log `excluded_by="<entry>"`. Clients must trust the group's
   CA, and upstream certificates are verified against the system trust store plus
   `forward.upstream_ca_file`; certificate pinning, upstream client certificates
   (mTLS) and interception of proxy-side HTTP/2 CONNECT are unsupported, with the

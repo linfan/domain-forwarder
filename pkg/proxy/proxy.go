@@ -171,18 +171,23 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, target, scheme 
 // handleConnect terminates matching HTTP/1.1 CONNECTs for HTTPS interception;
 // other requests use a hijacked HTTP/1.1 tunnel or an HTTP/2 CONNECT stream.
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
+	excluded := ""
 	if group, ok := s.config.MITM.Match(r.Host); ok {
-		if r.ProtoMajor >= 2 {
-			// Intercepting an HTTP/2 CONNECT stream would need a second tunnel
-			// inside the stream, which is not implemented. The rejection is
-			// reported here because no tunnel summary line follows it.
-			log.Printf("[CONNECT] proto=%s source=%s target=%s group=%s outcome=mitm_not_supported",
-				protoName(r), r.RemoteAddr, r.Host, group.Name)
-			http.Error(w, "Not Implemented: HTTPS interception over HTTP/2 CONNECT is not supported", http.StatusNotImplemented)
+		// A tunnel_connect entry outranks the group that covers the same host: the
+		// connection is relayed raw below, exactly as if no group had matched.
+		if excluded = s.config.MITM.Excluded(r.Host); excluded == "" {
+			if r.ProtoMajor >= 2 {
+				// Intercepting an HTTP/2 CONNECT stream would need a second tunnel
+				// inside the stream, which is not implemented. The rejection is
+				// reported here because no tunnel summary line follows it.
+				log.Printf("[CONNECT] proto=%s source=%s target=%s group=%s outcome=mitm_not_supported",
+					protoName(r), r.RemoteAddr, r.Host, group.Name)
+				http.Error(w, "Not Implemented: HTTPS interception over HTTP/2 CONNECT is not supported", http.StatusNotImplemented)
+				return
+			}
+			s.handleMITM(w, r, group)
 			return
 		}
-		s.handleMITM(w, r, group)
-		return
 	}
 
 	start := time.Now()
@@ -204,7 +209,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		c2t, t2c = s.tunnelH1(w, r, targetConn, start)
 	}
 
-	s.logTunnel(r, targetConn, c2t, t2c, time.Since(start))
+	s.logTunnel(r, targetConn, c2t, t2c, time.Since(start), excluded)
 }
 
 // tunnelH1 relays a CONNECT tunnel over a hijacked HTTP/1.1 connection.
@@ -365,9 +370,15 @@ type copyResult struct {
 // counters and duration; aborted tunnels replace the duration (equal to the
 // later direction's end time) with per-direction detail. upstream_local on an
 // abort carries the ephemeral port needed to match NAT/conntrack state.
-func (s *Server) logTunnel(r *http.Request, targetConn net.Conn, c2t, t2c copyResult, duration time.Duration) {
+// exclusion names the mitm.tunnel_connect entry that kept a covered authority
+// undecrypted, so the raw tunnel is not mistaken for a missing group. It gets
+// its own key because outcome= already reports how the tunnel ended.
+func (s *Server) logTunnel(r *http.Request, targetConn net.Conn, c2t, t2c copyResult, duration time.Duration, exclusion string) {
 	line := fmt.Sprintf("[%s] proto=%s source=%s target=%s upstream=%s sent=%d recv=%d",
 		r.Method, protoName(r), r.RemoteAddr, r.Host, targetConn.RemoteAddr(), c2t.bytes, t2c.bytes)
+	if exclusion != "" {
+		line += fmt.Sprintf(" excluded_by=%q", exclusion)
+	}
 
 	aborted := c2t.err != nil || t2c.err != nil
 	if !aborted {

@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -432,6 +433,193 @@ func TestUpstreamAddressDefaultsToTLSPort(t *testing.T) {
 		if got := upstreamAddress(tc.authority); got != tc.want {
 			t.Errorf("upstreamAddress(%q) = %q, want %q", tc.authority, got, tc.want)
 		}
+	}
+}
+
+// newBannerOrigin starts a server-speaks-first listener: it greets before it
+// reads, so a client sends no bytes until the greeting arrives. SMTP, FTP and
+// IMAP all behave this way, and none of them can be intercepted.
+func newBannerOrigin(t *testing.T) string {
+	t.Helper()
+	origin, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = origin.Close() })
+	go func() {
+		conn, err := origin.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Write([]byte("220 example ESMTP\r\n"))
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+	return origin.Addr().String()
+}
+
+// newExcludedMITMServer builds a proxy whose groups are carved out by the given
+// mitm.tunnel_connect entries.
+func newExcludedMITMServer(t *testing.T, hosts, entries []string) *Server {
+	t.Helper()
+	_, certFile, keyFile := newTestCACertificate(t)
+	authority, err := mitm.NewAuthority(certFile, keyFile, 0)
+	if err != nil {
+		t.Fatalf("NewAuthority: %v", err)
+	}
+	group, err := mitm.NewGroup("test", hosts, authority)
+	if err != nil {
+		t.Fatalf("NewGroup: %v", err)
+	}
+	tunnel, err := mitm.NewTunnelExclusion(entries)
+	if err != nil {
+		t.Fatalf("NewTunnelExclusion: %v", err)
+	}
+	return New(forwarder.New(forwarder.DefaultConfig()), Config{
+		MITM:                &mitm.Config{Groups: []*mitm.Group{group}, Tunnel: tunnel},
+		DialTimeout:         2 * time.Second,
+		TLSHandshakeTimeout: 5 * time.Second,
+		ReadHeaderTimeout:   5 * time.Second,
+		IdleTimeout:         10 * time.Second,
+		MaxHeaderBytes:      1 << 20,
+	})
+}
+
+// captureLogs redirects the process log so a test can assert on the lines that
+// are otherwise only visible in the operator's log file.
+func captureLogs(t *testing.T) *syncLog {
+	t.Helper()
+	flags := log.Flags()
+	log.SetFlags(0)
+	buf := &syncLog{}
+	log.SetOutput(buf)
+	t.Cleanup(func() { log.SetFlags(flags); log.SetOutput(os.Stderr) })
+	return buf
+}
+
+// syncLog collects log lines written by handler goroutines, so a test can wait
+// for a summary that only appears when a tunnel ends.
+type syncLog struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *syncLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *syncLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+// waitUntil fails when the captured output does not gain want before timing out.
+func (l *syncLog) waitUntil(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(l.String(), want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("captured log = %q, want %q", l.String(), want)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// TestConnectTunnelExclusionRelaysServerFirstProtocol is the case the exclusion
+// list exists for: the group covers the host, but the target greets before the
+// client speaks, so interception would have nothing to sniff.
+func TestConnectTunnelExclusionRelaysServerFirstProtocol(t *testing.T) {
+	authority := newBannerOrigin(t)
+	_, port, err := net.SplitHostPort(authority)
+	if err != nil {
+		t.Fatalf("split origin address: %v", err)
+	}
+	logged := captureLogs(t)
+
+	server := newExcludedMITMServer(t, []string{"*"}, []string{"*:" + port})
+	proxyServer := httptest.NewServer(server)
+	defer proxyServer.Close()
+
+	start := time.Now()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer conn.Close()
+
+	_, _ = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", authority, authority)
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		t.Fatalf("read CONNECT response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT status = %d, want 200", resp.StatusCode)
+	}
+
+	// Reading the greeting must not wait for the ClientHello sniff, which would
+	// cost the whole TLSHandshakeTimeout and then close the tunnel.
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	greeting, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read greeting: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("greeting took %v, want the tunnel to be dialed at once", elapsed)
+	}
+	if greeting != "220 example ESMTP\r\n" {
+		t.Fatalf("greeting = %q, want the origin banner", greeting)
+	}
+
+	// The summary line is written when the tunnel ends, so end it first.
+	_ = conn.Close()
+	logged.waitUntil(t, fmt.Sprintf("excluded_by=%q", "*:"+port))
+
+	line := logged.String()
+	if !strings.Contains(line, "target="+authority) {
+		t.Errorf("tunnel log = %q, want target=%s", line, authority)
+	}
+	if strings.Contains(line, "[MITM]") {
+		t.Errorf("an excluded CONNECT must never reach interception, got %q", line)
+	}
+}
+
+// TestConnectTunnelExclusionBeatsHTTP2Rejection shows the list is consulted
+// before the protocol check: an excluded authority is tunneled over an HTTP/2
+// CONNECT stream instead of being refused as unsupported for interception.
+func TestConnectTunnelExclusionBeatsHTTP2Rejection(t *testing.T) {
+	authority := newBannerOrigin(t)
+	_, port, err := net.SplitHostPort(authority)
+	if err != nil {
+		t.Fatalf("split origin address: %v", err)
+	}
+	logged := captureLogs(t)
+
+	server := newExcludedMITMServer(t, []string{"*"}, []string{"*:" + port})
+	req := httptest.NewRequest(http.MethodConnect, "https://"+authority, nil)
+	req.Host = authority
+	req.Proto = "HTTP/2.0"
+	req.ProtoMajor = 2
+	req.ProtoMinor = 0
+
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("excluded HTTP/2 CONNECT status = %d, want 200 (tunneled, not refused)", rec.Code)
+	}
+	if got := rec.Body.String(); !strings.Contains(got, "220 example ESMTP") {
+		t.Fatalf("stream body = %q, want the origin greeting", got)
+	}
+	line := logged.String()
+	if strings.Contains(line, "outcome=mitm_not_supported") {
+		t.Errorf("log = %q, want no interception rejection for an excluded target", line)
+	}
+	if !strings.Contains(line, fmt.Sprintf("excluded_by=%q", "*:"+port)) {
+		t.Errorf("log = %q, want excluded_by with the matching entry", line)
 	}
 }
 

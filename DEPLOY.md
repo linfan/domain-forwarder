@@ -168,6 +168,8 @@ interception.
 ```yaml
 mitm:
   enabled: true
+  tunnel_connect:
+    - "*:25"                     # SMTP greets before the client speaks
   groups:
     - name: internal
       ca_cert_file: /etc/domain-forwarder/mitm-internal-ca.crt
@@ -189,6 +191,12 @@ mitm:
   does for hosts listed in more than one group.
 - Non-TLS CONNECTs matched by a group (for example to port 80 or SSH) fall back
   to a plain tunnel automatically.
+- `tunnel_connect` entries are checked before any group and keep the listed
+  CONNECT authorities raw: `*` or `*.example.com` or a bare host, optionally with
+  `:port`. Use it for protocols whose server speaks first (SMTP 25, IMAP 143,
+  FTP 21) — with no ClientHello to sniff, interception could only wait and then
+  close the tunnel. Such a tunnel's summary line carries `excluded_by="<entry>"`.
+  An entry that names a port does not match an authority without one.
 
 ### 3. Trust the CA on clients
 

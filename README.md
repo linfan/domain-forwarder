@@ -93,7 +93,7 @@ export https_proxy=http://localhost:8080
   `access_control`（按来源 IP 与目标域名配置黑名单/白名单）、
   `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）、
   `edit`（转发前为请求追加 Header）、`mirror`（异步流量镜像）、
-  `mitm`（HTTPS 拦截证书组、域名规则与叶子缓存上限）
+  `mitm`（HTTPS 拦截证书组、域名规则、叶子缓存上限与 `tunnel_connect` 排除名单）
 - `forward`：转发引擎参数（连接池容量、上游信任库 `upstream_ca_file`、
   连接/TLS/响应头超时、`request_timeout`、`stream_idle_timeout`、
   `response_body_timeout`、`streaming_flush`、`disable_compression`、
@@ -120,7 +120,10 @@ export https_proxy=http://localhost:8080
   客户端请求支持 HTTP/1.1 与 HTTP/2，WebSocket 升级会先编辑握手头再双向转发；
   解密后的请求依次经过 `add_proxy_headers`、`edit`、`mirror` 后重新以 HTTPS
   发往原目标。组按配置顺序首次匹配，`hosts` 支持精确主机、`*.example.com`
-  （子域，不含裸域）和 `*`（全部域名）；未命中组的主机保持原始隧道。客户端需
+  （子域，不含裸域）和 `*`（全部域名）；未命中组的主机保持原始隧道，命中但被
+  `mitm.tunnel_connect` 列出的目标（主机 + 可选端口）同样保持原始隧道——服务端
+  先说话的协议（SMTP、IMAP、FTP）不发送 ClientHello，无从解密，只能这样放行，
+  这类隧道的日志带 `excluded_by=`。客户端需
   信任对应组的 CA，上游证书按系统信任库加上 `forward.upstream_ca_file` 校验；
   证书固定（pinning）、上游 mTLS 和代理侧 HTTP/2 CONNECT
   的 HTTPS 拦截不支持，最后一种情况返回 501
