@@ -355,6 +355,27 @@ func TestMITMUpgradeRefused(t *testing.T) {
 	}
 }
 
+func TestUpstreamAddressDefaultsToTLSPort(t *testing.T) {
+	cases := []struct {
+		authority string
+		want      string
+	}{
+		{"example.com", "example.com:443"},
+		{"Example.COM.", "example.com:443"},
+		{"example.com:8443", "example.com:8443"},
+		{"127.0.0.1", "127.0.0.1:443"},
+		{"127.0.0.1:14443", "127.0.0.1:14443"},
+		{"[::1]", "[::1]:443"},
+		{"[::1]:14443", "[::1]:14443"},
+		{"user:pw@example.com:14443", "example.com:14443"},
+	}
+	for _, tc := range cases {
+		if got := upstreamAddress(tc.authority); got != tc.want {
+			t.Errorf("upstreamAddress(%q) = %q, want %q", tc.authority, got, tc.want)
+		}
+	}
+}
+
 func TestMITMPlaintextCONNECTFallsBack(t *testing.T) {
 	upstream, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

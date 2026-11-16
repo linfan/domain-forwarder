@@ -210,6 +210,8 @@ there.
   intercepted.
 - Intercepted connections are not tracked by the main server's graceful
   shutdown, the same as raw HTTP/1.1 CONNECT tunnels.
+- A CONNECT authority without a port is dialed as port 443. Group matching
+  ignores ports altogether, so one pattern covers every port of a host.
 - Decrypted request bodies pass through `mirror` when it is enabled.
 
 ## Manual Deployment

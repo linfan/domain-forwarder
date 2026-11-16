@@ -60,7 +60,8 @@ mirror:
 # Groups are evaluated in order and the first match wins. Host patterns are "*"
 # (every host), "*.example.com" (subdomains only, not the bare domain), a bare
 # host name, or an IP literal; ports are ignored. A "*" group makes every later
-# group unreachable, so place it last.
+# group unreachable, so place it last. A CONNECT authority without a port is
+# dialed as port 443, for the raw upgrade relay and the plaintext fallback too.
 mitm:
   enabled: false
   max_cached_hosts: 4096         # Leaves kept per CA; the least recently useful host is

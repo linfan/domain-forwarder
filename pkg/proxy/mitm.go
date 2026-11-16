@@ -263,7 +263,7 @@ func (s *Server) relayUpgrade(w http.ResponseWriter, r *http.Request, authority 
 // dialUpstream opens a verified TLS connection to the CONNECT authority.
 func (s *Server) dialUpstream(r *http.Request, authority string) (net.Conn, error) {
 	dialer := &net.Dialer{Timeout: s.config.DialTimeout, KeepAlive: s.config.DialKeepAlive}
-	rawConn, err := dialer.DialContext(r.Context(), "tcp", authority)
+	rawConn, err := dialer.DialContext(r.Context(), "tcp", upstreamAddress(authority))
 	if err != nil {
 		return nil, err
 	}
@@ -288,17 +288,34 @@ func (s *Server) dialUpstream(r *http.Request, authority string) (net.Conn, erro
 
 // dialAndRelay keeps an intercepted-but-plaintext CONNECT as a raw tunnel.
 func (s *Server) dialAndRelay(r *http.Request, start time.Time, clientConn net.Conn, clientReader io.Reader) {
+	authority := upstreamAddress(r.Host)
 	targetConn, err := (&net.Dialer{
 		Timeout:   s.config.DialTimeout,
 		KeepAlive: s.config.DialKeepAlive,
-	}).Dial("tcp", r.Host)
+	}).Dial("tcp", authority)
 	if err != nil {
-		log.Printf("Error connecting to %s: %v", r.Host, err)
+		log.Printf("Error connecting to %s: %v", authority, err)
 		_ = clientConn.Close()
 		return
 	}
 	c2t, t2c := s.relay(start, clientConn, clientReader, targetConn)
 	s.logTunnel(r, targetConn, c2t, t2c, time.Since(start))
+}
+
+// upstreamAddress is where a CONNECT authority points. A bare host means the TLS
+// port, which is what net/http dials for the decrypted requests, so the raw
+// relay paths have to assume the same thing instead of failing to parse it.
+func upstreamAddress(authority string) string {
+	// Same userinfo rule as mitm.Host: everything after the last @ is the host,
+	// and net.SplitHostPort cannot parse colons inside credentials.
+	if i := strings.LastIndexByte(authority, '@'); i >= 0 {
+		authority = authority[i+1:]
+	}
+	host, port, err := net.SplitHostPort(authority)
+	if err != nil || port == "" {
+		return net.JoinHostPort(mitm.Host(authority), "443")
+	}
+	return net.JoinHostPort(host, port)
 }
 
 func closeWrite(conn net.Conn) {
