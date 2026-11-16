@@ -69,7 +69,8 @@ mirror:
 # stays an opaque TCP tunnel even when a group covers its host. This is the exit
 # for protocols where the server speaks first (SMTP, FTP, IMAP): the client sends
 # no TLS ClientHello to sniff, so interception has nothing to decide on and the
-# tunnel would only stall until forward.tls_handshake_timeout and close. An entry
+# tunnel would only stall until forward.tls_handshake_timeout, close and log
+# outcome=clienthello_timeout. An entry
 # is a host pattern plus an optional port: "*:25" covers port 25 of every host,
 # "*.example.com:143" one port of one domain, "legacy.example.com" every port of
 # that host. Matching ignores case, userinfo, IPv6 brackets and a trailing dot,
@@ -162,7 +163,9 @@ forward:
                                  # intercepted tunnel it also bounds the wait for the client's
                                  # first ClientHello byte after 200 Connection Established; a
                                  # client that sends nothing gets that tunnel closed after this
-                                 # long (0 falls back to 10s there, it never means "unlimited").
+                                 # long, logged as outcome=clienthello_timeout. A target whose
+                                 # server speaks first belongs in mitm.tunnel_connect instead
+                                 # (0 falls back to 10s there, it never means "unlimited").
   upstream_ca_file: ""           # PEM bundle of extra CAs trusted for upstream HTTPS, in
                                  # addition to the system trust store. Interception re-dials the
                                  # target as a TLS client, so hosts served from a private CA need

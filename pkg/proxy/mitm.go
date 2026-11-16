@@ -57,9 +57,11 @@ func (s *Server) handleMITM(w http.ResponseWriter, r *http.Request, group *mitm.
 	first, err := brw.Reader.Peek(1)
 	_ = clientConn.SetReadDeadline(time.Time{})
 	if err != nil {
-		if s.config.Debug {
-			log.Printf("[MITM] source=%s target=%s: waiting for client hello: %v", r.RemoteAddr, r.Host, err)
-		}
+		// Nothing arrived to decide with, so the tunnel closes. Reported even
+		// without debug because the client sees only a dead connection: this line
+		// is what identifies the port that belongs in mitm.tunnel_connect.
+		log.Printf("[MITM] source=%s target=%s group=%s outcome=clienthello_timeout duration=%v",
+			r.RemoteAddr, r.Host, group.Name, time.Since(start).Round(time.Millisecond))
 		_ = clientConn.Close()
 		return
 	}

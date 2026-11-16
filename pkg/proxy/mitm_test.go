@@ -436,6 +436,50 @@ func TestUpstreamAddressDefaultsToTLSPort(t *testing.T) {
 	}
 }
 
+// TestMITMClientHelloTimeoutIsLogged covers the other half of the carve-out: a
+// matched CONNECT whose peer never speaks. The client only sees the tunnel die,
+// so the reason has to be in the log without debug, and it has to name the
+// target an operator would put in mitm.tunnel_connect.
+func TestMITMClientHelloTimeoutIsLogged(t *testing.T) {
+	logged := captureLogs(t)
+	server := newMITMTestServer(t, []string{"*"}, nil, 100*time.Millisecond)
+	proxyServer := httptest.NewServer(server)
+	defer proxyServer.Close()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer conn.Close()
+
+	const authority = "silent.example.com:443"
+	_, _ = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", authority, authority)
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		t.Fatalf("read CONNECT response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT status = %d, want 200", resp.StatusCode)
+	}
+
+	logged.waitUntil(t, "outcome=clienthello_timeout")
+	line := logged.String()
+	if !strings.Contains(line, "target="+authority) || !strings.Contains(line, "group=test") {
+		t.Errorf("log = %q, want the timed-out target and its group", line)
+	}
+	if strings.Contains(line, "[CONNECT]") {
+		t.Errorf("nothing was dialed, so no tunnel summary must be logged: %q", line)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	if n, err := reader.Read(make([]byte, 1)); n > 0 {
+		t.Fatalf("read %d bytes after the sniff timeout, want the tunnel closed", n)
+	} else if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("read after timeout = %v, want EOF or the read deadline", err)
+	}
+}
+
 // newBannerOrigin starts a server-speaks-first listener: it greets before it
 // reads, so a client sends no bytes until the greeting arrives. SMTP, FTP and
 // IMAP all behave this way, and none of them can be intercepted.
@@ -458,9 +502,10 @@ func newBannerOrigin(t *testing.T) string {
 	return origin.Addr().String()
 }
 
-// newExcludedMITMServer builds a proxy whose groups are carved out by the given
-// mitm.tunnel_connect entries.
-func newExcludedMITMServer(t *testing.T, hosts, entries []string) *Server {
+// newMITMTestServer builds a proxy with one CA group over hosts, carved out by
+// the given mitm.tunnel_connect entries (empty disables the list), waiting the
+// given time for the ClientHello sniff.
+func newMITMTestServer(t *testing.T, hosts, entries []string, sniffTimeout time.Duration) *Server {
 	t.Helper()
 	_, certFile, keyFile := newTestCACertificate(t)
 	authority, err := mitm.NewAuthority(certFile, keyFile, 0)
@@ -478,7 +523,7 @@ func newExcludedMITMServer(t *testing.T, hosts, entries []string) *Server {
 	return New(forwarder.New(forwarder.DefaultConfig()), Config{
 		MITM:                &mitm.Config{Groups: []*mitm.Group{group}, Tunnel: tunnel},
 		DialTimeout:         2 * time.Second,
-		TLSHandshakeTimeout: 5 * time.Second,
+		TLSHandshakeTimeout: sniffTimeout,
 		ReadHeaderTimeout:   5 * time.Second,
 		IdleTimeout:         10 * time.Second,
 		MaxHeaderBytes:      1 << 20,
@@ -539,7 +584,7 @@ func TestConnectTunnelExclusionRelaysServerFirstProtocol(t *testing.T) {
 	}
 	logged := captureLogs(t)
 
-	server := newExcludedMITMServer(t, []string{"*"}, []string{"*:" + port})
+	server := newMITMTestServer(t, []string{"*"}, []string{"*:" + port}, 5*time.Second)
 	proxyServer := httptest.NewServer(server)
 	defer proxyServer.Close()
 
@@ -598,7 +643,7 @@ func TestConnectTunnelExclusionBeatsHTTP2Rejection(t *testing.T) {
 	}
 	logged := captureLogs(t)
 
-	server := newExcludedMITMServer(t, []string{"*"}, []string{"*:" + port})
+	server := newMITMTestServer(t, []string{"*"}, []string{"*:" + port}, 5*time.Second)
 	req := httptest.NewRequest(http.MethodConnect, "https://"+authority, nil)
 	req.Host = authority
 	req.Proto = "HTTP/2.0"
