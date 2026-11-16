@@ -164,20 +164,34 @@ func (lc *LogConfig) Enabled() bool {
 	return lc.Dir != "" && lc.Filename != ""
 }
 
+// AccessListConfig is the blacklist/whitelist pair for one request attribute.
+// A blacklist match rejects the request; when the whitelist is non-empty, only
+// matching requests are admitted. Empty lists impose no restriction.
+type AccessListConfig struct {
+	Blacklist []string `yaml:"blacklist"`
+	Whitelist []string `yaml:"whitelist"`
+}
+
+// AccessControlConfig gates requests by client IP and target host, each with
+// its own blacklist and whitelist.
+type AccessControlConfig struct {
+	SourceIP     AccessListConfig `yaml:"source_ip"`     // Individual IPs or CIDR ranges
+	TargetDomain AccessListConfig `yaml:"target_domain"` // Bare host names or IP literals
+}
+
 // Config represents the application configuration.
 type Config struct {
-	Addr                  string        `yaml:"addr"`
-	Debug                 bool          `yaml:"debug"`
-	AddProxyHeaders       bool          `yaml:"add_proxy_headers"`       // Add X-Forwarded-For/Proto/Host when forwarding
-	SourceIPBlacklist     []string      `yaml:"source_ip_blacklist"`     // Client IPs or CIDR ranges rejected with 403
-	TargetDomainWhitelist []string      `yaml:"target_domain_whitelist"` // Upstream hosts permitted through the proxy; empty allows all
-	Auth                  AuthConfig    `yaml:"auth"`
-	Edit                  EditConfig    `yaml:"edit"`
-	Mirror                MirrorConfig  `yaml:"mirror"`
-	Forward               ForwardConfig `yaml:"forward"`
-	Server                ServerConfig  `yaml:"server"`
-	Log                   LogConfig     `yaml:"log"`
-	TLS                   TLSConfig     `yaml:"tls"`
+	Addr            string              `yaml:"addr"`
+	Debug           bool                `yaml:"debug"`
+	AddProxyHeaders bool                `yaml:"add_proxy_headers"` // Add X-Forwarded-For/Proto/Host when forwarding
+	AccessControl   AccessControlConfig `yaml:"access_control"`    // Client IP and target host filtering
+	Auth            AuthConfig          `yaml:"auth"`
+	Edit            EditConfig          `yaml:"edit"`
+	Mirror          MirrorConfig        `yaml:"mirror"`
+	Forward         ForwardConfig       `yaml:"forward"`
+	Server          ServerConfig        `yaml:"server"`
+	Log             LogConfig           `yaml:"log"`
+	TLS             TLSConfig           `yaml:"tls"`
 }
 
 // defaultForwardConfig returns the built-in forward section defaults. The
@@ -256,15 +270,20 @@ func (cfg *Config) Validate() error {
 		return fmt.Errorf("server timeouts must not be negative")
 	}
 
-	for _, entry := range cfg.SourceIPBlacklist {
-		if err := validateBlacklistEntry(entry); err != nil {
-			return fmt.Errorf("source_ip_blacklist: %w", err)
-		}
-	}
-
-	for _, entry := range cfg.TargetDomainWhitelist {
-		if err := validateDomainEntry(entry); err != nil {
-			return fmt.Errorf("target_domain_whitelist: %w", err)
+	for _, list := range []struct {
+		path     string
+		entries  []string
+		validate func(string) error
+	}{
+		{"access_control.source_ip.blacklist", cfg.AccessControl.SourceIP.Blacklist, validateIPEntry},
+		{"access_control.source_ip.whitelist", cfg.AccessControl.SourceIP.Whitelist, validateIPEntry},
+		{"access_control.target_domain.blacklist", cfg.AccessControl.TargetDomain.Blacklist, validateDomainEntry},
+		{"access_control.target_domain.whitelist", cfg.AccessControl.TargetDomain.Whitelist, validateDomainEntry},
+	} {
+		for _, entry := range list.entries {
+			if err := list.validate(entry); err != nil {
+				return fmt.Errorf("%s: %w", list.path, err)
+			}
 		}
 	}
 
@@ -379,9 +398,9 @@ func validHeaderName(name string) bool {
 	return true
 }
 
-// validateBlacklistEntry checks a single source_ip_blacklist entry, which may be
+// validateIPEntry checks a single access_control.source_ip entry, which must be
 // an individual IP or a CIDR range.
-func validateBlacklistEntry(entry string) error {
+func validateIPEntry(entry string) error {
 	if strings.Contains(entry, "/") {
 		if _, _, err := net.ParseCIDR(entry); err != nil {
 			return fmt.Errorf("invalid CIDR range %q", entry)
@@ -394,8 +413,8 @@ func validateBlacklistEntry(entry string) error {
 	return nil
 }
 
-// validateDomainEntry checks a single target_domain_whitelist entry, which must
-// be a bare host name or IP literal: no scheme, port, path or wildcard.
+// validateDomainEntry checks a single access_control.target_domain entry, which
+// must be a bare host name or IP literal: no scheme, port, path or wildcard.
 func validateDomainEntry(entry string) error {
 	if entry == "" {
 		return fmt.Errorf("domain entry must not be empty")

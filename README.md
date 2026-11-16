@@ -86,8 +86,8 @@ export https_proxy=http://localhost:8080
 
 配置分为以下几部分：
 
-- 顶层：`addr`、`debug`、`add_proxy_headers`、`source_ip_blacklist`、
-  `target_domain_whitelist`（目标域名白名单）、
+- 顶层：`addr`、`debug`、`add_proxy_headers`、
+  `access_control`（按来源 IP 与目标域名配置黑名单/白名单）、
   `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）、
   `edit`（转发前为请求追加 Header）、`mirror`（异步流量镜像）
 - `forward`：转发引擎参数（连接池容量、连接/TLS/响应头超时、
@@ -114,9 +114,10 @@ export https_proxy=http://localhost:8080
   缓冲区池
 - **镜像**：`mirror` 开启时，普通 HTTP 请求在转发的同时异步投递一份到镜像目标；
   CONNECT 不镜像，投递失败仅在 `debug` 模式下记录日志
-- **目标域名白名单**：配置非空 `target_domain_whitelist` 后，普通 HTTP 与 CONNECT
-  的目标主机不在列表内即返回 403，不会发起上游连接；匹配不区分大小写并忽略端口，
-  子域名需逐个列出
+- **访问控制**：`access_control.source_ip` 与 `access_control.target_domain` 各自
+  支持 `blacklist` / `whitelist`；命中黑名单返回 403，白名单非空时仅放行列表内的
+  请求。目标域名匹配不区分大小写并忽略端口，子域名需逐个列出；普通 HTTP 与
+  CONNECT 都会在发起上游连接前被拦截
 - **失败处理**：响应开始前转发失败返回 502 Bad Gateway；响应已经开始后的失败
   仅记录日志
 

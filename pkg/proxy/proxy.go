@@ -17,17 +17,30 @@ import (
 	"domain-forwarder/pkg/forwarder"
 )
 
+// AccessList holds the filter entries for one request attribute. A blacklist
+// match rejects the request; when the whitelist is non-empty, only matching
+// entries are admitted. Empty lists impose no restriction.
+type AccessList struct {
+	Blacklist []string
+	Whitelist []string
+}
+
+// AccessControl gates requests by client IP and target host.
+type AccessControl struct {
+	SourceIP     AccessList
+	TargetDomain AccessList
+}
+
 // Config carries the settings the proxy handler needs.
 type Config struct {
-	Debug                 bool
-	AddProxyHeaders       bool
-	EditHeaders           map[string]string // Headers set on forwarded plain-HTTP requests; nil disables editing
-	Mirror                *Mirror           // Async shadow delivery; nil disables mirroring
-	SourceIPBlacklist     []string
-	TargetDomainWhitelist []string      // Allowed upstream hosts; empty disables the check
-	Auth                  *Auth         // nil disables proxy authentication
-	DialTimeout           time.Duration // CONNECT tunnel dial timeout
-	DialKeepAlive         time.Duration // CONNECT tunnel TCP keep-alive interval
+	Debug           bool
+	AddProxyHeaders bool
+	EditHeaders     map[string]string // Headers set on forwarded plain-HTTP requests; nil disables editing
+	Mirror          *Mirror           // Async shadow delivery; nil disables mirroring
+	AccessControl   AccessControl
+	Auth            *Auth         // nil disables proxy authentication
+	DialTimeout     time.Duration // CONNECT tunnel dial timeout
+	DialKeepAlive   time.Duration // CONNECT tunnel TCP keep-alive interval
 }
 
 // Server is the forward proxy HTTP handler.
@@ -49,12 +62,23 @@ func New(engine *forwarder.Forwarder, config Config) *Server {
 // ServeHTTP dispatches CONNECT requests to the tunnel handler and everything
 // else through the forwarding engine.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && forwarder.IPBlacklisted(s.config.SourceIPBlacklist, clientIP) {
-		if s.config.Debug {
-			log.Printf("[BLOCKED] source=%s - IP is blacklisted", r.RemoteAddr)
+	ac := s.config.AccessControl
+
+	if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		if forwarder.IPBlocked(ac.SourceIP.Blacklist, clientIP) {
+			if s.config.Debug {
+				log.Printf("[BLOCKED] source=%s - IP is blacklisted", r.RemoteAddr)
+			}
+			http.Error(w, "Forbidden: request is not allowed", http.StatusForbidden)
+			return
 		}
-		http.Error(w, "Forbidden: request is not allowed", http.StatusForbidden)
-		return
+		if !forwarder.IPAllowed(ac.SourceIP.Whitelist, clientIP) {
+			if s.config.Debug {
+				log.Printf("[BLOCKED] source=%s - IP is not whitelisted", r.RemoteAddr)
+			}
+			http.Error(w, "Forbidden: request is not allowed", http.StatusForbidden)
+			return
+		}
 	}
 
 	if s.auth != nil && !s.auth.allow(r) {
@@ -66,9 +90,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The whitelist gates the destination for both plain HTTP and CONNECT, so a
-	// denied tunnel is never dialed.
-	if !forwarder.HostAllowed(s.config.TargetDomainWhitelist, r.Host) {
+	// The target lists gate the destination for both plain HTTP and CONNECT, so
+	// a denied tunnel is never dialed.
+	if forwarder.HostBlocked(ac.TargetDomain.Blacklist, r.Host) {
+		if s.config.Debug {
+			log.Printf("[BLOCKED] source=%s target=%s - target domain is blacklisted", r.RemoteAddr, r.Host)
+		}
+		http.Error(w, "Forbidden: target domain is not allowed", http.StatusForbidden)
+		return
+	}
+	if !forwarder.HostAllowed(ac.TargetDomain.Whitelist, r.Host) {
 		if s.config.Debug {
 			log.Printf("[BLOCKED] source=%s target=%s - target domain is not whitelisted", r.RemoteAddr, r.Host)
 		}

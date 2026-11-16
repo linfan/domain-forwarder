@@ -42,24 +42,36 @@ mirror:
   max_body_bytes: 1048576        # Capture at most 1 MiB of the request body; 0 = bodies are never mirrored
   queue_size: 256                # Pending mirror jobs; overflow is dropped silently
 
-# Reject requests whose source IP matches an entry below with 403.
-# Entries are individual IPs or CIDR ranges.
-source_ip_blacklist: []
-# source_ip_blacklist:
-#   - 203.0.113.7
-#   - 192.168.0.0/16
-
-# Restrict which upstream hosts the proxy may reach. When non-empty, a plain
-# HTTP request or CONNECT tunnel whose target host is not listed is rejected
-# with 403 before any upstream connection is made. An empty list allows every
-# host. Entries are exact host names or IP literals, matched case-insensitively;
-# the request's port is ignored, so one entry covers every port. Subdomains are
-# not implied: list each host explicitly. No scheme, port, path or wildcard.
-target_domain_whitelist: []
-# target_domain_whitelist:
-#   - api.example.com
-#   - example.com
-#   - 127.0.0.1
+# Request access control, enforced before any upstream connection is made.
+# Both source_ip and target_domain accept a blacklist and a whitelist:
+#   - blacklist: matching requests are rejected with 403
+#   - whitelist: when non-empty, only matching requests are admitted; others
+#                get 403
+# An empty list imposes no restriction. When both are configured the blacklist
+# is checked first, so a matching entry always denies.
+access_control:
+  # Client IPs: individual IPv4/IPv6 addresses or CIDR ranges.
+  source_ip:
+    blacklist: []
+    # blacklist:
+    #   - 203.0.113.7
+    #   - 192.168.0.0/16
+    whitelist: []
+    # whitelist:
+    #   - 10.0.0.0/8
+  # Upstream hosts: exact host names or IP literals, matched case-insensitively.
+  # The request's port is ignored, so one entry covers every port. Subdomains
+  # are not implied: list each host explicitly. No scheme, port, path or
+  # wildcard.
+  target_domain:
+    blacklist: []
+    # blacklist:
+    #   - metadata.internal
+    whitelist: []
+    # whitelist:
+    #   - api.example.com
+    #   - example.com
+    #   - 127.0.0.1
 
 # Require HTTP Basic authentication from proxy clients. Unauthenticated or
 # invalid requests get 407 Proxy Authentication Required with a

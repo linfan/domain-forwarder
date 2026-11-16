@@ -391,12 +391,19 @@ func AddForwardedHeaders(r *http.Request, scheme string) {
 // matched case-insensitively; a port, IPv6 brackets and a trailing dot are
 // ignored on the request side.
 func HostAllowed(whitelist []string, hostport string) bool {
-	if len(whitelist) == 0 {
-		return true
-	}
+	return len(whitelist) == 0 || hostInList(whitelist, hostport)
+}
+
+// HostBlocked reports whether hostport is covered by the blacklist. An empty
+// blacklist blocks nothing; matching follows the same rules as HostAllowed.
+func HostBlocked(blacklist []string, hostport string) bool {
+	return len(blacklist) > 0 && hostInList(blacklist, hostport)
+}
+
+func hostInList(list []string, hostport string) bool {
 	host := hostOnly(hostport)
-	for _, allowed := range whitelist {
-		if strings.EqualFold(host, strings.TrimSuffix(allowed, ".")) {
+	for _, entry := range list {
+		if strings.EqualFold(host, strings.TrimSuffix(entry, ".")) {
 			return true
 		}
 	}
@@ -415,24 +422,31 @@ func hostOnly(hostport string) string {
 	return strings.TrimSuffix(strings.Trim(hostport, "[]"), ".")
 }
 
-// IPBlacklisted reports whether the given IP address is covered by an entry of
-// the blacklist. Entries may be individual IPs or CIDR ranges.
-func IPBlacklisted(blacklist []string, ipStr string) bool {
-	if len(blacklist) == 0 {
-		return false
-	}
+// IPAllowed reports whether ipStr is covered by the whitelist. An empty
+// whitelist allows every address; an address that does not parse matches no
+// entry and is therefore rejected.
+func IPAllowed(whitelist []string, ipStr string) bool {
+	return len(whitelist) == 0 || ipInList(whitelist, ipStr)
+}
 
+// IPBlocked reports whether ipStr is covered by the blacklist. An empty
+// blacklist blocks nothing. Entries may be individual IPs or CIDR ranges.
+func IPBlocked(blacklist []string, ipStr string) bool {
+	return len(blacklist) > 0 && ipInList(blacklist, ipStr)
+}
+
+func ipInList(list []string, ipStr string) bool {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return false
 	}
 
-	for _, blocked := range blacklist {
-		if strings.Contains(blocked, "/") {
-			if _, ipNet, err := net.ParseCIDR(blocked); err == nil && ipNet.Contains(ip) {
+	for _, entry := range list {
+		if strings.Contains(entry, "/") {
+			if _, ipNet, err := net.ParseCIDR(entry); err == nil && ipNet.Contains(ip) {
 				return true
 			}
-		} else if blockedIP := net.ParseIP(blocked); blockedIP != nil && blockedIP.Equal(ip) {
+		} else if entryIP := net.ParseIP(entry); entryIP != nil && entryIP.Equal(ip) {
 			return true
 		}
 	}

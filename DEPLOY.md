@@ -28,9 +28,9 @@ built-in defaults.
 Startup validation exits with code `1` and a precise message for: an
 ill-formed `addr` or out-of-range port, a non-positive `forward.buffer_size`
 or `server.max_header_bytes`, a negative duration or pool size, an invalid
-blacklist entry (neither an IP nor a CIDR range), an invalid whitelist entry
-(empty, or carrying a scheme, port, path or wildcard), `auth` enabled without a
-username or password, a username containing `:`, a password starting with `$2`
+`access_control.source_ip` entry (neither an IP nor a CIDR range), an invalid
+`access_control.target_domain` entry (empty, or carrying a scheme, port, path
+or wildcard), `auth` enabled without a username or password, a username containing `:`, a password starting with `$2`
 that is not a valid bcrypt hash, an `edit.add_headers` entry whose name is not
 an RFC 7230 token or whose value contains CR/LF/NUL, `mirror` enabled with a
 missing, non-http(s), host-less or query/fragment-bearing `mirror.target` or
@@ -274,7 +274,7 @@ sudo journalctl -u domain-forwarder -n 50 --no-pager
 ```
 
 Startup failures (missing/invalid config, a bad `addr`, negative durations,
-an invalid blacklist entry, missing TLS files, a port already in use) are
+an invalid access-control entry, missing TLS files, a port already in use) are
 printed with a precise message. Run the binary manually to see it directly:
 
 ```bash

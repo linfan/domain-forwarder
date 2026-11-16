@@ -114,19 +114,27 @@ func main() {
 	}
 
 	handler := proxy.New(engine, proxy.Config{
-		Debug:                 cfg.Debug,
-		AddProxyHeaders:       cfg.AddProxyHeaders,
-		EditHeaders:           editHeaders,
-		Mirror:                mirror,
-		SourceIPBlacklist:     cfg.SourceIPBlacklist,
-		TargetDomainWhitelist: cfg.TargetDomainWhitelist,
-		Auth:                  auth,
-		DialTimeout:           cfg.Forward.DialTimeout,
-		DialKeepAlive:         cfg.Forward.DialKeepAlive,
+		Debug:           cfg.Debug,
+		AddProxyHeaders: cfg.AddProxyHeaders,
+		EditHeaders:     editHeaders,
+		Mirror:          mirror,
+		AccessControl: proxy.AccessControl{
+			SourceIP: proxy.AccessList{
+				Blacklist: cfg.AccessControl.SourceIP.Blacklist,
+				Whitelist: cfg.AccessControl.SourceIP.Whitelist,
+			},
+			TargetDomain: proxy.AccessList{
+				Blacklist: cfg.AccessControl.TargetDomain.Blacklist,
+				Whitelist: cfg.AccessControl.TargetDomain.Whitelist,
+			},
+		},
+		Auth:          auth,
+		DialTimeout:   cfg.Forward.DialTimeout,
+		DialKeepAlive: cfg.Forward.DialKeepAlive,
 	})
 
-	if len(cfg.TargetDomainWhitelist) > 0 {
-		log.Printf("Target domain whitelist enabled: %s", strings.Join(cfg.TargetDomainWhitelist, ", "))
+	if len(cfg.AccessControl.TargetDomain.Whitelist) > 0 {
+		log.Printf("Target domain whitelist enabled: %s", strings.Join(cfg.AccessControl.TargetDomain.Whitelist, ", "))
 	}
 
 	server := &http.Server{
