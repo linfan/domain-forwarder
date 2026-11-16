@@ -78,6 +78,11 @@ func (s *Server) handleMITM(w http.ResponseWriter, r *http.Request, group *mitm.
 			if name == "" {
 				name = connectHost
 			} else if !group.Match(name) {
+				// net/http answers the handshake with a TLS alert and never logs the
+				// reason, so the refusal is recorded here: the tunnel summary alone
+				// would only show requested=0.
+				log.Printf("[MITM] source=%s target=%s group=%s sni=%s outcome=sni_outside_group",
+					r.RemoteAddr, authority, group.Name, hello.ServerName)
 				return nil, fmt.Errorf("SNI %q is outside interception group %q", hello.ServerName, group.Name)
 			}
 			return group.CA.CertificateFor(name)

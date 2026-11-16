@@ -323,7 +323,11 @@ client-side local address.
 
 Intercepted CONNECTs print one summary line per decrypted request plus a
 `[MITM] source=... target=... group=... requested=N duration=...` line when the
-connection ends. Handshake and relay errors are logged only with `debug: true`.
+connection ends. Two rejections are logged on their own, because no summary line
+would explain them: a CONNECT that matches a group but arrives over proxy-side
+HTTP/2 logs `outcome=mitm_not_supported`, and a ClientHello naming a host outside
+that group logs `sni=` with `outcome=sni_outside_group`. Other handshake and
+relay errors are logged only with `debug: true`.
 
 ## Testing Utilities
 

@@ -370,6 +370,50 @@ func TestMITMUpgradeRefused(t *testing.T) {
 	}
 }
 
+// TestMITMRejectsForeignSNI covers a tunnel whose CONNECT target is intercepted
+// while its ClientHello names a host outside the group: signing for that host
+// would let one tunnel reach another target, so the handshake must fail and the
+// reason must be recorded.
+func TestMITMRejectsForeignSNI(t *testing.T) {
+	upstream, _ := newTestUpstream(t, false)
+	defer upstream.Close()
+
+	proxyServer, caRoots := newTestMITMProxy(t, []string{"127.0.0.1"}, nil, nil, rootPool(upstream.Certificate()))
+	defer proxyServer.Close()
+
+	upstreamAddr := strings.TrimPrefix(upstream.URL, "https://")
+	conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer conn.Close()
+	_, _ = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", upstreamAddr, upstreamAddr)
+	connectResp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		t.Fatalf("read CONNECT response: %v", err)
+	}
+	if connectResp.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT status = %d, want 200", connectResp.StatusCode)
+	}
+
+	var logged bytes.Buffer
+	flags := log.Flags()
+	log.SetFlags(0)
+	log.SetOutput(&logged)
+	defer func() { log.SetFlags(flags); log.SetOutput(os.Stderr) }()
+
+	tlsConn := tls.Client(conn, &tls.Config{RootCAs: caRoots, ServerName: "elsewhere.example.com"})
+	if err := tlsConn.Handshake(); err == nil {
+		t.Fatal("handshake with an out-of-group SNI must be refused")
+	}
+	line := logged.String()
+	if !strings.Contains(line, "outcome=sni_outside_group") ||
+		!strings.Contains(line, "sni=elsewhere.example.com") ||
+		!strings.Contains(line, "target="+upstreamAddr) {
+		t.Errorf("rejection log = %q, want the SNI, target and outcome=sni_outside_group", line)
+	}
+}
+
 func TestUpstreamAddressDefaultsToTLSPort(t *testing.T) {
 	cases := []struct {
 		authority string
