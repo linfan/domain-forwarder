@@ -145,9 +145,10 @@ Field-by-field defaults, validation rules and tuning advice live in
 - **Access control**: `access_control.source_ip` and
   `access_control.target_domain` each take a `blacklist` and a `whitelist`; a
   blacklist match gets 403, and a non-empty whitelist admits only listed
-  requests. Domain matching ignores case and ports, and subdomains must be
-  listed explicitly. Plain HTTP and CONNECT are both checked before any
-  upstream connection is made
+  requests. Domain matching ignores case and ports; entries accept exact hosts,
+  `*.example.com` (subdomains only, not the bare domain) and `*` (every host).
+  Plain HTTP and CONNECT are both checked before any upstream connection is
+  made
 - **Failures**: A forwarding failure before the response starts returns 502 Bad
   Gateway; failures after the response has started are only logged
 

@@ -120,19 +120,21 @@ access_control:
     whitelist: []
     # whitelist:
     #   - 10.0.0.0/8
-  # Upstream hosts: exact host names or IP literals, matched case-insensitively.
-  # The request's port is ignored, so one entry covers every port. Subdomains
-  # are not implied: list each host explicitly. No scheme, port, path or
-  # wildcard.
+  # Upstream hosts: exact host names, IP literals, "*.example.com" (subdomains
+  # only, the bare domain is not implied) or "*" (every host), matched
+  # case-insensitively. The request's port is ignored, so one entry covers
+  # every port. No scheme, port or path.
   target_domain:
     blacklist: []
     # blacklist:
     #   - metadata.internal
     whitelist: []
     # whitelist:
-    #   - api.example.com
     #   - example.com
+    #   - api.example.com
+    #   - "*.example.com"
     #   - 127.0.0.1
+    #   - "*"
 
 # Require HTTP Basic authentication from proxy clients. Unauthenticated or
 # invalid requests get 407 Proxy Authentication Required with a

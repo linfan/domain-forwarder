@@ -390,9 +390,10 @@ func AddForwardedHeaders(r *http.Request, scheme string) {
 }
 
 // HostAllowed reports whether hostport is covered by the whitelist. An empty
-// whitelist allows every host. Entries are exact host names or IP literals
-// matched case-insensitively; a port, IPv6 brackets and a trailing dot are
-// ignored on the request side.
+// whitelist allows every host. Entries are exact host names, IP literals,
+// "*.example.com" (subdomains only) or "*" (every host), matched
+// case-insensitively; a port, IPv6 brackets and a trailing dot are ignored on
+// the request side.
 func HostAllowed(whitelist []string, hostport string) bool {
 	return len(whitelist) == 0 || hostInList(whitelist, hostport)
 }
@@ -405,12 +406,29 @@ func HostBlocked(blacklist []string, hostport string) bool {
 
 func hostInList(list []string, hostport string) bool {
 	host := hostOnly(hostport)
+	if host == "" {
+		return false
+	}
 	for _, entry := range list {
-		if strings.EqualFold(host, strings.TrimSuffix(entry, ".")) {
+		if matchHostPattern(entry, host) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchHostPattern reports whether host, as returned by hostOnly, is covered by
+// one list entry. The suffix pattern leaves out the bare domain: "*.example.com"
+// covers api.example.com but not example.com.
+func matchHostPattern(entry, host string) bool {
+	if entry == "*" {
+		return true
+	}
+	if rest, ok := strings.CutPrefix(entry, "*."); ok {
+		suffix := "." + strings.ToLower(strings.TrimSuffix(rest, "."))
+		return len(host) > len(suffix) && strings.HasSuffix(strings.ToLower(host), suffix)
+	}
+	return strings.EqualFold(host, strings.TrimSuffix(entry, "."))
 }
 
 // hostOnly strips userinfo, the port and IPv6 brackets from a host:port

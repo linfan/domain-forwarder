@@ -67,6 +67,53 @@ func TestServeHTTPTargetDomainBlacklist(t *testing.T) {
 	}
 }
 
+func TestServeHTTPTargetDomainWildcard(t *testing.T) {
+	whitelisted := New(forwarder.New(forwarder.DefaultConfig()), Config{
+		AccessControl: AccessControl{
+			TargetDomain: AccessList{Whitelist: []string{"*.allowed.example"}},
+		},
+	})
+
+	tests := []struct {
+		name   string
+		method string
+		host   string
+	}{
+		{"bare domain not matched", http.MethodConnect, "allowed.example:1"},
+		{"suffix lookalike not matched", http.MethodConnect, "evil-allowed.example:1"},
+		{"deep suffix lookalike not matched", http.MethodGet, "allowed.example.evil.test:1"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := serve(whitelisted, tc.method, tc.host, "192.0.2.1:1234")
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d (body %q)", w.Code, http.StatusForbidden, w.Body.String())
+			}
+		})
+	}
+
+	// The catch-all reaches the dialing stage for any host, so an unreachable
+	// local target proves admission without needing DNS.
+	catchAll := New(forwarder.New(forwarder.DefaultConfig()), Config{
+		AccessControl: AccessControl{
+			TargetDomain: AccessList{Whitelist: []string{"*"}},
+		},
+	})
+	if w := serve(catchAll, http.MethodConnect, "127.0.0.1:1", "192.0.2.1:1234"); w.Code != http.StatusBadGateway {
+		t.Fatalf("catch-all whitelist status = %d, want %d (body %q)", w.Code, http.StatusBadGateway, w.Body.String())
+	}
+
+	blocked := New(forwarder.New(forwarder.DefaultConfig()), Config{
+		AccessControl: AccessControl{
+			TargetDomain: AccessList{Blacklist: []string{"*"}},
+		},
+	})
+	if w := serve(blocked, http.MethodConnect, "127.0.0.1:1", "192.0.2.1:1234"); w.Code != http.StatusForbidden {
+		t.Fatalf("catch-all blacklist status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
 func TestServeHTTPSourceIPWhitelist(t *testing.T) {
 	s := New(forwarder.New(forwarder.DefaultConfig()), Config{
 		AccessControl: AccessControl{

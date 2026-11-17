@@ -131,8 +131,9 @@ export https_proxy=http://localhost:8080
   的 CONNECT 不镜像，投递失败仅在 `debug` 模式下记录日志
 - **访问控制**：`access_control.source_ip` 与 `access_control.target_domain` 各自
   支持 `blacklist` / `whitelist`；命中黑名单返回 403，白名单非空时仅放行列表内的
-  请求。目标域名匹配不区分大小写并忽略端口，子域名需逐个列出；普通 HTTP 与
-  CONNECT 都会在发起上游连接前被拦截
+  请求。目标域名匹配不区分大小写并忽略端口，支持精确主机、`*.example.com`
+  （子域，不含裸域）和 `*`（全部域名）；普通 HTTP 与 CONNECT 都会在发起上游
+  连接前被拦截
 - **失败处理**：响应开始前转发失败返回 502 Bad Gateway；响应已经开始后的失败
   仅记录日志
 

@@ -68,6 +68,49 @@ func TestHostBlocked(t *testing.T) {
 	}
 }
 
+func TestHostWildcard(t *testing.T) {
+	whitelist := []string{"*.example.com"}
+
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"api.example.com", true},
+		{"API.Example.com:443", true},
+		{"a.b.example.com", true},
+		{"api.example.com.", true},
+		{"example.com", false},
+		{"example.com:443", false},
+		{"notexample.com", false},
+		{"example.com.evil.test", false},
+		{"", false},
+	}
+
+	for _, tc := range tests {
+		if got := HostAllowed(whitelist, tc.host); got != tc.want {
+			t.Errorf("HostAllowed(%q) = %v, want %v", tc.host, got, tc.want)
+		}
+	}
+}
+
+func TestHostCatchAll(t *testing.T) {
+	for _, host := range []string{"anything.test", "example.com:8080", "127.0.0.1:9090", "[::1]:443"} {
+		if !HostAllowed([]string{"*"}, host) {
+			t.Errorf("HostAllowed(*, %q) = false, want true", host)
+		}
+		if !HostBlocked([]string{"*"}, host) {
+			t.Errorf("HostBlocked(*, %q) = false, want true", host)
+		}
+	}
+
+	if HostAllowed([]string{"*"}, "") {
+		t.Error("catch-all whitelist must not admit an empty host")
+	}
+	if HostBlocked([]string{"*"}, "") {
+		t.Error("catch-all blacklist must not match an empty host")
+	}
+}
+
 func TestIPFilters(t *testing.T) {
 	whitelist := []string{"10.0.0.1", "192.168.0.0/16", "2001:db8::/32"}
 	blacklist := []string{"203.0.113.7", "198.51.100.0/24"}

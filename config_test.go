@@ -51,6 +51,33 @@ func TestMITMTunnelConnectValidation(t *testing.T) {
 	}
 }
 
+func TestTargetDomainValidation(t *testing.T) {
+	for _, entry := range []string{
+		"example.com", "api.example.com", "127.0.0.1", "*.example.com", "*.internal.example.com.", "*",
+	} {
+		cfg := defaultConfig()
+		cfg.AccessControl.TargetDomain.Whitelist = []string{entry}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate rejected target_domain.whitelist %q: %v", entry, err)
+		}
+	}
+
+	for _, entry := range []string{
+		"", " api.example.com", "https://example.com", "example.com:443", "example.com/path",
+		"api.*.com", "*example.com", "*.", "*.127.0.0.1",
+	} {
+		cfg := defaultConfig()
+		cfg.AccessControl.TargetDomain.Blacklist = []string{entry}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatalf("Validate accepted target_domain.blacklist %q", entry)
+		}
+		if !strings.Contains(err.Error(), "access_control.target_domain.blacklist") {
+			t.Errorf("error for %q = %v, want it to name access_control.target_domain.blacklist", entry, err)
+		}
+	}
+}
+
 func TestUpstreamTLSConfigDisabledByDefault(t *testing.T) {
 	fc := defaultForwardConfig()
 	config, err := fc.UpstreamTLSConfig()

@@ -236,7 +236,7 @@ type AccessListConfig struct {
 // its own blacklist and whitelist.
 type AccessControlConfig struct {
 	SourceIP     AccessListConfig `yaml:"source_ip"`     // Individual IPs or CIDR ranges
-	TargetDomain AccessListConfig `yaml:"target_domain"` // Bare host names or IP literals
+	TargetDomain AccessListConfig `yaml:"target_domain"` // Bare host names, IP literals, *.example.com or *
 }
 
 // Config represents the application configuration.
@@ -523,14 +523,33 @@ func validateIPEntry(entry string) error {
 	return nil
 }
 
-// validateDomainEntry checks a single access_control.target_domain entry, which
-// must be a bare host name or IP literal: no scheme, port, path or wildcard.
+// validateDomainEntry checks a single access_control.target_domain entry: a bare
+// host name, an IP literal, "*.example.com" (subdomains only) or "*".
 func validateDomainEntry(entry string) error {
 	if entry == "" {
 		return fmt.Errorf("domain entry must not be empty")
 	}
-	if strings.ContainsAny(entry, "/:@?#*") || strings.ContainsAny(entry, " \t\r\n") {
-		return fmt.Errorf("invalid domain %q: must be a bare host name without scheme, port, path or wildcard", entry)
+	if strings.ContainsAny(entry, " \t\r\n") {
+		return fmt.Errorf("invalid domain %q: must not contain whitespace", entry)
+	}
+	if entry == "*" {
+		return nil
+	}
+	if rest, ok := strings.CutPrefix(entry, "*."); ok {
+		rest = strings.TrimSuffix(rest, ".")
+		if rest == "" || strings.ContainsAny(rest, "*:/@?#[]") {
+			return fmt.Errorf("invalid domain %q: wildcard must look like *.example.com", entry)
+		}
+		if net.ParseIP(rest) != nil {
+			return fmt.Errorf("invalid domain %q: wildcard cannot cover an IP literal", entry)
+		}
+		return nil
+	}
+	if strings.ContainsAny(entry, "*") {
+		return fmt.Errorf("invalid domain %q: wildcard is only allowed as a leading * or *.", entry)
+	}
+	if strings.ContainsAny(entry, "/:@?#[]") {
+		return fmt.Errorf("invalid domain %q: must be a bare host name without scheme, port or path", entry)
 	}
 	return nil
 }
