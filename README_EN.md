@@ -97,7 +97,7 @@ The config is grouped into these sections:
   `mirror` (asynchronous traffic mirroring),
   `mitm` (HTTPS interception groups, host rules, the leaf cache limit and the
   tunnel_connect exclusions)
-- `forward`: forwarding-engine parameters (pool sizes, the
+- `transport`: forwarding-engine parameters (pool sizes, the
   `upstream_ca_file` trust bundle, dial/TLS/header timeouts,
   `request_timeout`, `stream_idle_timeout`, `response_body_timeout`,
   `streaming_flush`, `disable_compression`, `force_attempt_http2`,
@@ -123,7 +123,7 @@ Field-by-field defaults, validation rules and tuning advice live in
 - **Streaming**: `text/event-stream` responses are flushed chunk by chunk
 - **Tunnels**: HTTP/1.1 CONNECT is hijacked into a raw TCP tunnel, while
   HTTP/2 CONNECT relays data inside the stream; both use
-  `forward.dial_timeout` / `forward.dial_keep_alive` and reuse the engine's
+  `transport.dial_timeout` / `transport.dial_keep_alive` and reuse the engine's
   buffer pool
 - **HTTPS interception**: An HTTP/1.1 CONNECT matching a `mitm` group is
   terminated locally, serving HTTP/1.1 and HTTP/2 inside the tunnel; WebSocket
@@ -136,7 +136,7 @@ Field-by-field defaults, validation rules and tuning advice live in
   protocols (SMTP, IMAP, FTP), which send no ClientHello to intercept, and the
   tunnels it keeps raw log `excluded_by="<entry>"`. Clients must trust the group's
   CA, and upstream certificates are verified against the system trust store plus
-  `forward.upstream_ca_file`; certificate pinning, upstream client certificates
+  `transport.upstream_ca_file`; certificate pinning, upstream client certificates
   (mTLS) and interception of proxy-side HTTP/2 CONNECT are unsupported, with the
   last case returning 501
 - **Mirroring**: With `mirror` enabled, forwarded requests are also delivered

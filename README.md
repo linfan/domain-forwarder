@@ -94,7 +94,7 @@ export https_proxy=http://localhost:8080
   `auth`（代理客户端的 HTTP Basic 认证，单用户，密码可为明文或 bcrypt 哈希）、
   `edit`（转发前为请求追加 Header）、`mirror`（异步流量镜像）、
   `mitm`（HTTPS 拦截证书组、域名规则、叶子缓存上限与 `tunnel_connect` 排除名单）
-- `forward`：转发引擎参数（连接池容量、上游信任库 `upstream_ca_file`、
+- `transport`：转发引擎参数（连接池容量、上游信任库 `upstream_ca_file`、
   连接/TLS/响应头超时、`request_timeout`、`stream_idle_timeout`、
   `response_body_timeout`、`streaming_flush`、`disable_compression`、
   `force_attempt_http2`、`buffer_size`）
@@ -114,7 +114,7 @@ export https_proxy=http://localhost:8080
 - **重定向**：上游 3xx 响应原样返回客户端，代理不自行跟随
 - **流式响应**：`text/event-stream` 响应逐块 flush
 - **隧道**：HTTP/1.1 CONNECT 劫持为原始 TCP 隧道，HTTP/2 CONNECT 在流内转发；
-  两者都使用 `forward.dial_timeout` / `forward.dial_keep_alive`，并复用引擎的
+  两者都使用 `transport.dial_timeout` / `transport.dial_keep_alive`，并复用引擎的
   缓冲区池
 - **HTTPS 拦截**：命中 `mitm` 组的 HTTP/1.1 CONNECT 在本地终止 TLS，隧道内的
   客户端请求支持 HTTP/1.1 与 HTTP/2，WebSocket 升级会先编辑握手头再双向转发；
@@ -124,7 +124,7 @@ export https_proxy=http://localhost:8080
   `mitm.tunnel_connect` 列出的目标（主机 + 可选端口）同样保持原始隧道——服务端
   先说话的协议（SMTP、IMAP、FTP）不发送 ClientHello，无从解密，只能这样放行，
   这类隧道的日志带 `excluded_by=`。客户端需
-  信任对应组的 CA，上游证书按系统信任库加上 `forward.upstream_ca_file` 校验；
+  信任对应组的 CA，上游证书按系统信任库加上 `transport.upstream_ca_file` 校验；
   证书固定（pinning）、上游 mTLS 和代理侧 HTTP/2 CONNECT
   的 HTTPS 拦截不支持，最后一种情况返回 501
 - **镜像**：`mirror` 开启时，转发请求在发送的同时异步投递一份到镜像目标；未解密

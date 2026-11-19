@@ -86,14 +86,14 @@ func main() {
 
 	// The shared forwarding engine. A forward proxy stays transparent, so the
 	// client's Accept-Encoding is kept (stripAcceptEncoding=false).
-	upstreamTLS, err := cfg.Forward.UpstreamTLSConfig()
+	upstreamTLS, err := cfg.Transport.UpstreamTLSConfig()
 	if err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 	if upstreamTLS != nil {
-		log.Printf("Trusting additional upstream certificate authorities from %s", cfg.Forward.UpstreamCAFile)
+		log.Printf("Trusting additional upstream certificate authorities from %s", cfg.Transport.UpstreamCAFile)
 	}
-	engineConfig := cfg.Forward.EngineConfig(false)
+	engineConfig := cfg.Transport.EngineConfig(false)
 	engineConfig.TLSClientConfig = upstreamTLS
 	engine := forwarder.New(engineConfig)
 
@@ -175,9 +175,9 @@ func main() {
 			},
 		},
 		Auth:                auth,
-		DialTimeout:         cfg.Forward.DialTimeout,
-		DialKeepAlive:       cfg.Forward.DialKeepAlive,
-		TLSHandshakeTimeout: cfg.Forward.TLSHandshakeTimeout,
+		DialTimeout:         cfg.Transport.DialTimeout,
+		DialKeepAlive:       cfg.Transport.DialKeepAlive,
+		TLSHandshakeTimeout: cfg.Transport.TLSHandshakeTimeout,
 		ReadHeaderTimeout:   cfg.Server.ReadHeaderTimeout,
 		IdleTimeout:         cfg.Server.IdleTimeout,
 		MaxHeaderBytes:      cfg.Server.MaxHeaderBytes,

@@ -80,11 +80,11 @@ type MirrorConfig struct {
 	QueueSize    int           `yaml:"queue_size"`     // Pending mirror jobs; overflow is dropped
 }
 
-// ForwardConfig represents the forwarding engine configuration. The plain
-// values are prepopulated with defaults before the YAML file is overlaid, so
-// explicitly configured zeros stay zero; the two *bool fields are tri-state
-// (unset = default via the accessors).
-type ForwardConfig struct {
+// TransportConfig represents the transport section: forwarding engine
+// configuration. The plain values are prepopulated with defaults before the YAML
+// file is overlaid, so explicitly configured zeros stay zero; the two *bool
+// fields are tri-state (unset = default via the accessors).
+type TransportConfig struct {
 	BufferSize            int           `yaml:"buffer_size"`
 	MaxIdleConns          int           `yaml:"max_idle_conns"`
 	MaxIdleConnsPerHost   int           `yaml:"max_idle_conns_per_host"`
@@ -106,15 +106,15 @@ type ForwardConfig struct {
 
 // StreamingFlushEnabled reports whether streaming responses are relayed chunk by
 // chunk with an explicit flush after each chunk (default true).
-func (fc *ForwardConfig) StreamingFlushEnabled() bool {
-	return fc.StreamingFlush == nil || *fc.StreamingFlush
+func (tc *TransportConfig) StreamingFlushEnabled() bool {
+	return tc.StreamingFlush == nil || *tc.StreamingFlush
 }
 
 // CompressionDisabled reports whether compression negotiation with the upstream
 // is disabled (default true). A compressing gateway buffers SSE streams in the
 // compressor, so events pile up there and reach the client in bursts.
-func (fc *ForwardConfig) CompressionDisabled() bool {
-	return fc.DisableCompression == nil || *fc.DisableCompression
+func (tc *TransportConfig) CompressionDisabled() bool {
+	return tc.DisableCompression == nil || *tc.DisableCompression
 }
 
 // UpstreamTLSConfig builds the client TLS settings for every upstream HTTPS
@@ -124,13 +124,13 @@ func (fc *ForwardConfig) CompressionDisabled() bool {
 // switch, and listing h2 here would advertise a protocol the transport may not
 // be configured to speak. Returns nil when no file is configured, leaving the
 // engine on the system trust store.
-func (fc *ForwardConfig) UpstreamTLSConfig() (*tls.Config, error) {
-	if fc.UpstreamCAFile == "" {
+func (tc *TransportConfig) UpstreamTLSConfig() (*tls.Config, error) {
+	if tc.UpstreamCAFile == "" {
 		return nil, nil
 	}
-	bundle, err := os.ReadFile(fc.UpstreamCAFile)
+	bundle, err := os.ReadFile(tc.UpstreamCAFile)
 	if err != nil {
-		return nil, fmt.Errorf("forward.upstream_ca_file: %w", err)
+		return nil, fmt.Errorf("transport.upstream_ca_file: %w", err)
 	}
 	roots, err := x509.SystemCertPool()
 	if err != nil {
@@ -138,66 +138,66 @@ func (fc *ForwardConfig) UpstreamTLSConfig() (*tls.Config, error) {
 		roots = x509.NewCertPool()
 	}
 	if !roots.AppendCertsFromPEM(bundle) {
-		return nil, fmt.Errorf("forward.upstream_ca_file %s contains no certificates", fc.UpstreamCAFile)
+		return nil, fmt.Errorf("transport.upstream_ca_file %s contains no certificates", tc.UpstreamCAFile)
 	}
 	return &tls.Config{RootCAs: roots}, nil
 }
 
-// Validate checks the forward section for semantic errors.
-func (fc *ForwardConfig) Validate() error {
-	if fc.BufferSize <= 0 {
-		return fmt.Errorf("forward.buffer_size must be positive, got %d", fc.BufferSize)
+// Validate checks the transport section for semantic errors.
+func (tc *TransportConfig) Validate() error {
+	if tc.BufferSize <= 0 {
+		return fmt.Errorf("transport.buffer_size must be positive, got %d", tc.BufferSize)
 	}
-	if fc.MaxIdleConns < 0 || fc.MaxIdleConnsPerHost < 0 || fc.MaxConnsPerHost < 0 {
-		return fmt.Errorf("forward connection pool sizes must not be negative")
+	if tc.MaxIdleConns < 0 || tc.MaxIdleConnsPerHost < 0 || tc.MaxConnsPerHost < 0 {
+		return fmt.Errorf("transport connection pool sizes must not be negative")
 	}
 	for _, d := range []struct {
 		name  string
 		value time.Duration
 	}{
-		{"idle_conn_timeout", fc.IdleConnTimeout},
-		{"tls_handshake_timeout", fc.TLSHandshakeTimeout},
-		{"expect_continue_timeout", fc.ExpectContinueTimeout},
-		{"response_header_timeout", fc.ResponseHeaderTimeout},
-		{"dial_timeout", fc.DialTimeout},
-		{"dial_keep_alive", fc.DialKeepAlive},
-		{"request_timeout", fc.RequestTimeout},
-		{"stream_idle_timeout", fc.StreamIdleTimeout},
-		{"response_body_timeout", fc.ResponseBodyTimeout},
+		{"idle_conn_timeout", tc.IdleConnTimeout},
+		{"tls_handshake_timeout", tc.TLSHandshakeTimeout},
+		{"expect_continue_timeout", tc.ExpectContinueTimeout},
+		{"response_header_timeout", tc.ResponseHeaderTimeout},
+		{"dial_timeout", tc.DialTimeout},
+		{"dial_keep_alive", tc.DialKeepAlive},
+		{"request_timeout", tc.RequestTimeout},
+		{"stream_idle_timeout", tc.StreamIdleTimeout},
+		{"response_body_timeout", tc.ResponseBodyTimeout},
 	} {
 		if d.value < 0 {
-			return fmt.Errorf("forward.%s must not be negative, got %s", d.name, d.value)
+			return fmt.Errorf("transport.%s must not be negative, got %s", d.name, d.value)
 		}
 	}
-	if _, err := fc.UpstreamTLSConfig(); err != nil {
+	if _, err := tc.UpstreamTLSConfig(); err != nil {
 		return err
 	}
 	return nil
 }
 
-// EngineConfig converts the YAML forward section into the shared forwarding
+// EngineConfig converts the YAML transport section into the shared forwarding
 // engine configuration. stripAcceptEncoding drops the client's Accept-Encoding
 // before forwarding: gateways that must not let the upstream compress set it,
 // transparent forward proxies leave it false.
-func (fc *ForwardConfig) EngineConfig(stripAcceptEncoding bool) forwarder.Config {
+func (tc *TransportConfig) EngineConfig(stripAcceptEncoding bool) forwarder.Config {
 	return forwarder.Config{
-		BufferSize:            fc.BufferSize,
-		MaxIdleConns:          fc.MaxIdleConns,
-		MaxIdleConnsPerHost:   fc.MaxIdleConnsPerHost,
-		MaxConnsPerHost:       fc.MaxConnsPerHost,
-		IdleConnTimeout:       fc.IdleConnTimeout,
-		TLSHandshakeTimeout:   fc.TLSHandshakeTimeout,
-		ExpectContinueTimeout: fc.ExpectContinueTimeout,
-		ResponseHeaderTimeout: fc.ResponseHeaderTimeout,
-		DialTimeout:           fc.DialTimeout,
-		DialKeepAlive:         fc.DialKeepAlive,
-		RequestTimeout:        fc.RequestTimeout,
-		StreamIdleTimeout:     fc.StreamIdleTimeout,
-		ResponseBodyTimeout:   fc.ResponseBodyTimeout,
-		StreamingFlush:        fc.StreamingFlushEnabled(),
+		BufferSize:            tc.BufferSize,
+		MaxIdleConns:          tc.MaxIdleConns,
+		MaxIdleConnsPerHost:   tc.MaxIdleConnsPerHost,
+		MaxConnsPerHost:       tc.MaxConnsPerHost,
+		IdleConnTimeout:       tc.IdleConnTimeout,
+		TLSHandshakeTimeout:   tc.TLSHandshakeTimeout,
+		ExpectContinueTimeout: tc.ExpectContinueTimeout,
+		ResponseHeaderTimeout: tc.ResponseHeaderTimeout,
+		DialTimeout:           tc.DialTimeout,
+		DialKeepAlive:         tc.DialKeepAlive,
+		RequestTimeout:        tc.RequestTimeout,
+		StreamIdleTimeout:     tc.StreamIdleTimeout,
+		ResponseBodyTimeout:   tc.ResponseBodyTimeout,
+		StreamingFlush:        tc.StreamingFlushEnabled(),
 		StripAcceptEncoding:   stripAcceptEncoding,
-		DisableCompression:    fc.CompressionDisabled(),
-		ForceAttemptHTTP2:     fc.ForceAttemptHTTP2,
+		DisableCompression:    tc.CompressionDisabled(),
+		ForceAttemptHTTP2:     tc.ForceAttemptHTTP2,
 	}
 }
 
@@ -249,16 +249,16 @@ type Config struct {
 	Edit            EditConfig          `yaml:"edit"`
 	Mirror          MirrorConfig        `yaml:"mirror"`
 	MITM            MITMConfig          `yaml:"mitm"`
-	Forward         ForwardConfig       `yaml:"forward"`
+	Transport       TransportConfig     `yaml:"transport"`
 	Server          ServerConfig        `yaml:"server"`
 	Log             LogConfig           `yaml:"log"`
 	TLS             TLSConfig           `yaml:"tls"`
 }
 
-// defaultForwardConfig returns the built-in forward section defaults. The
+// defaultTransportConfig returns the built-in transport section defaults. The
 // values mirror pkg/forwarder.DefaultConfig; keep the two in sync.
-func defaultForwardConfig() ForwardConfig {
-	return ForwardConfig{
+func defaultTransportConfig() TransportConfig {
+	return TransportConfig{
 		BufferSize:            32 * 1024,
 		MaxIdleConns:          1000,
 		MaxIdleConnsPerHost:   100,
@@ -278,9 +278,9 @@ func defaultForwardConfig() ForwardConfig {
 // on top, so values omitted there keep these defaults.
 func defaultConfig() *Config {
 	return &Config{
-		Addr:    ":8080",
-		Forward: defaultForwardConfig(),
-		MITM:    MITMConfig{MaxCachedHosts: mitm.DefaultMaxCachedHosts},
+		Addr:      ":8080",
+		Transport: defaultTransportConfig(),
+		MITM:      MITMConfig{MaxCachedHosts: mitm.DefaultMaxCachedHosts},
 		Server: ServerConfig{
 			ReadHeaderTimeout: 10 * time.Second,
 			IdleTimeout:       120 * time.Second,
@@ -321,7 +321,7 @@ func (cfg *Config) Validate() error {
 		return err
 	}
 
-	if err := cfg.Forward.Validate(); err != nil {
+	if err := cfg.Transport.Validate(); err != nil {
 		return err
 	}
 

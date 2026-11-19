@@ -69,7 +69,7 @@ mirror:
 # stays an opaque TCP tunnel even when a group covers its host. This is the exit
 # for protocols where the server speaks first (SMTP, FTP, IMAP): the client sends
 # no TLS ClientHello to sniff, so interception has nothing to decide on and the
-# tunnel would only stall until forward.tls_handshake_timeout, close and log
+# tunnel would only stall until transport.tls_handshake_timeout, close and log
 # outcome=clienthello_timeout. An entry
 # is a host pattern plus an optional port: "*:25" covers port 25 of every host,
 # "*.example.com:143" one port of one domain, "legacy.example.com" every port of
@@ -152,10 +152,10 @@ auth:
   # password: $2y$10$...     # htpasswd -nbB alice 's3cret' | cut -d: -f2
 
 # -----------------------------------------------------------------------------
-# Forwarding engine: upstream connection pool, timeouts and streaming
+# Transport: upstream connection pool, timeouts and streaming
 # (HTTP requests and CONNECT tunnels share the dial settings below)
 # -----------------------------------------------------------------------------
-forward:
+transport:
   buffer_size: 32768             # Copy buffer size in bytes (default: 32KB)
   max_idle_conns: 1000           # Max total idle (keep-alive) connections in the pool
   max_idle_conns_per_host: 100   # Max idle connections per upstream host

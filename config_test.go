@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMITMTunnelConnectValidation(t *testing.T) {
@@ -78,17 +79,45 @@ func TestTargetDomainValidation(t *testing.T) {
 	}
 }
 
+func TestLoadConfigTransportSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("transport:\n  dial_timeout: 3s\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Transport.DialTimeout != 3*time.Second {
+		t.Errorf("transport.dial_timeout = %s, want 3s", cfg.Transport.DialTimeout)
+	}
+	// The section is overlaid on the defaults, so omitted keys keep theirs.
+	if want := defaultTransportConfig().BufferSize; cfg.Transport.BufferSize != want {
+		t.Errorf("transport.buffer_size = %d, want default %d", cfg.Transport.BufferSize, want)
+	}
+
+	if err := os.WriteFile(path, []byte("transport:\n  buffer_size: 0\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("LoadConfig accepted a non-positive transport.buffer_size")
+	} else if !strings.Contains(err.Error(), "transport.buffer_size") {
+		t.Errorf("error = %v, want it to name transport.buffer_size", err)
+	}
+}
+
 func TestUpstreamTLSConfigDisabledByDefault(t *testing.T) {
-	fc := defaultForwardConfig()
-	config, err := fc.UpstreamTLSConfig()
+	tc := defaultTransportConfig()
+	config, err := tc.UpstreamTLSConfig()
 	if err != nil {
 		t.Fatalf("UpstreamTLSConfig with no CA file: %v", err)
 	}
 	if config != nil {
 		t.Fatalf("UpstreamTLSConfig = %+v, want nil so the system trust store is used", config)
 	}
-	if err := fc.Validate(); err != nil {
-		t.Fatalf("default forward section must validate: %v", err)
+	if err := tc.Validate(); err != nil {
+		t.Fatalf("default transport section must validate: %v", err)
 	}
 }
 
@@ -105,12 +134,12 @@ func TestUpstreamTLSConfigTrustsPrivateCA(t *testing.T) {
 		t.Fatalf("write CA file: %v", err)
 	}
 
-	fc := defaultForwardConfig()
-	fc.UpstreamCAFile = caFile
-	if err := fc.Validate(); err != nil {
+	tc := defaultTransportConfig()
+	tc.UpstreamCAFile = caFile
+	if err := tc.Validate(); err != nil {
 		t.Fatalf("Validate with a configured CA bundle: %v", err)
 	}
-	config, err := fc.UpstreamTLSConfig()
+	config, err := tc.UpstreamTLSConfig()
 	if err != nil {
 		t.Fatalf("UpstreamTLSConfig: %v", err)
 	}
@@ -169,9 +198,9 @@ func TestUpstreamTLSConfigLeavesHTTP2ToTransport(t *testing.T) {
 		{"force_attempt_http2 true", true, "HTTP/2.0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fc := defaultForwardConfig()
-			fc.UpstreamCAFile = caFile
-			config, err := fc.UpstreamTLSConfig()
+			transportConfig := defaultTransportConfig()
+			transportConfig.UpstreamCAFile = caFile
+			config, err := transportConfig.UpstreamTLSConfig()
 			if err != nil {
 				t.Fatalf("UpstreamTLSConfig: %v", err)
 			}
@@ -192,10 +221,10 @@ func TestUpstreamTLSConfigLeavesHTTP2ToTransport(t *testing.T) {
 }
 
 func TestUpstreamTLSConfigRejectsUsableLookingFiles(t *testing.T) {
-	fc := defaultForwardConfig()
+	tc := defaultTransportConfig()
 
-	fc.UpstreamCAFile = filepath.Join(t.TempDir(), "missing.pem")
-	if _, err := fc.UpstreamTLSConfig(); err == nil {
+	tc.UpstreamCAFile = filepath.Join(t.TempDir(), "missing.pem")
+	if _, err := tc.UpstreamTLSConfig(); err == nil {
 		t.Error("a missing CA file must be reported")
 	} else if !strings.Contains(err.Error(), "upstream_ca_file") {
 		t.Errorf("error should name the setting, got %v", err)
@@ -205,11 +234,11 @@ func TestUpstreamTLSConfigRejectsUsableLookingFiles(t *testing.T) {
 	if err := os.WriteFile(noCerts, []byte("not a certificate\n"), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	fc.UpstreamCAFile = noCerts
-	if _, err := fc.UpstreamTLSConfig(); err == nil {
+	tc.UpstreamCAFile = noCerts
+	if _, err := tc.UpstreamTLSConfig(); err == nil {
 		t.Error("a bundle without certificates must be reported")
 	}
-	if err := fc.Validate(); err == nil {
+	if err := tc.Validate(); err == nil {
 		t.Error("Validate must reject a bundle without certificates at startup")
 	}
 }

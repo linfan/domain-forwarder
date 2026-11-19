@@ -26,7 +26,7 @@ starts with all defaults; precedence: command-line flags > config file >
 built-in defaults.
 
 Startup validation exits with code `1` and a precise message for: an
-ill-formed `addr` or out-of-range port, a non-positive `forward.buffer_size`
+ill-formed `addr` or out-of-range port, a non-positive `transport.buffer_size`
 or `server.max_header_bytes`, a negative duration or pool size, an invalid
 `access_control.source_ip` entry (neither an IP nor a CIDR range), an invalid
 `access_control.target_domain` entry (empty, or carrying whitespace, a scheme,
@@ -336,7 +336,7 @@ connection ends. Three outcomes are logged on their own, because no summary line
 would explain them: a CONNECT that matches a group but arrives over proxy-side
 HTTP/2 logs `outcome=mitm_not_supported`, a ClientHello naming a host outside
 that group logs `sni=` with `outcome=sni_outside_group`, and a CONNECT whose peer
-sends nothing within `forward.tls_handshake_timeout` logs
+sends nothing within `transport.tls_handshake_timeout` logs
 `outcome=clienthello_timeout` — that is a server-speaks-first protocol, so its
 port belongs in `mitm.tunnel_connect`. Other handshake and
 relay errors are logged only with `debug: true`.
